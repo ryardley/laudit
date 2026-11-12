@@ -1,0 +1,3 @@
+inputs:
+  laudit:
+    url: git+file:.

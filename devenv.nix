@@ -16,7 +16,8 @@
     runtimeInputs = with pkgs; [coreutils gnused gawk gnugrep ripgrep jq git];
     text = ''exec ${pkgs.bash}/bin/bash ${ticketSrc}/ticket "$@"'';
   };
+  laudit = inputs.laudit.packages.${pkgs.stdenv.hostPlatform.system}.laudit;
 in {
   languages.rust.enable = true;
-  packages = [tk];
+  packages = [tk laudit];
 }

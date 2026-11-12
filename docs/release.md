@@ -89,8 +89,9 @@ The flake exposes `packages.<system>.laudit` (and `default`), `apps.<system>.lau
 `overlays.default`. It supports `x86_64-linux` and `aarch64-linux`, builds the
 whole workspace with `rustPlatform.buildRustPackage`, and pins dependencies with
 `cargoLock.lockFile = ./Cargo.lock`. The binary reports the crate version
-(`laudit --version`). `devenv.nix` remains the development environment; the
-flake is the packaging/installation path. `nix flake check` must pass.
+(`laudit --version`). `devenv.nix` remains the development environment and
+consumes the flake's `laudit` package via the `laudit` input in `devenv.yaml`,
+so the dev shell includes the binary. `nix flake check` must pass.
 
 ## Tooling
 
