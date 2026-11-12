@@ -3,6 +3,7 @@
 pub mod config;
 pub mod model;
 pub mod prompts;
+pub mod recon;
 pub mod redact;
 pub mod rpc;
 
