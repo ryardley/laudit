@@ -1,6 +1,6 @@
 ---
 id: lc-s7w8
-status: open
+status: closed
 deps: [lc-60sv]
 links: []
 created: 2026-11-12T08:57:02Z

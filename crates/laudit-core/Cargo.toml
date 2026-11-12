@@ -10,11 +10,14 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+bytes = "1.10.1"
+futures-util = "0.3.31"
 ignore = "0.4.23"
 regex = "1.13.1"
+reqwest = { version = "0.12.24", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
-tokio = { version = "1.53.3", features = ["rt", "macros", "io-std", "io-util", "sync"] }
+tokio = { version = "1.53.3", features = ["rt", "macros", "io-std", "io-util", "sync", "time"] }
 toml = { version = "0.8.19", default-features = false, features = ["parse"] }
 tree-sitter = "0.25.10"
 tree-sitter-bash = "0.25.1"
@@ -27,3 +30,6 @@ tree-sitter-toml-ng = "0.7.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-yaml = "0.7.2"
 streaming-iterator = "0.1.9"
+
+[dev-dependencies]
+wiremock = "0.6.5"

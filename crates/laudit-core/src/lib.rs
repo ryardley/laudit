@@ -1,6 +1,7 @@
 //! Editor-agnostic engine for `laudit` guided codebase tours.
 
 pub mod config;
+pub mod llm;
 pub mod model;
 pub mod prompts;
 pub mod recon;
