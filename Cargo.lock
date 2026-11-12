@@ -1239,6 +1239,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "laudit-core",
+ "laudit-mcp",
  "laudit-tui",
  "serde_json",
  "tokio",
@@ -1273,6 +1274,16 @@ dependencies = [
  "tree-sitter-typescript",
  "tree-sitter-yaml",
  "two-face",
+ "wiremock",
+]
+
+[[package]]
+name = "laudit-mcp"
+version = "0.1.0"
+dependencies = [
+ "laudit-core",
+ "serde_json",
+ "tokio",
  "wiremock",
 ]
 

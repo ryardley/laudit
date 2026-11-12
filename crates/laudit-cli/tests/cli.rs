@@ -113,7 +113,6 @@ fn stubs_parse_documented_flags_and_exit_non_zero() {
             "--json",
         ],
         &["ask", "what does this do?"],
-        &["mcp"],
         &["outline"],
         &["clear"],
     ];
@@ -131,6 +130,22 @@ fn stubs_parse_documented_flags_and_exit_non_zero() {
             "missing stub message for {args:?}: {stderr}"
         );
     }
+}
+
+#[test]
+fn mcp_starts_and_exits_cleanly_on_eof() {
+    let temp = TempDir::new();
+    let config_dir = temp.path().join("config");
+    let output = Command::new(env!("CARGO_BIN_EXE_laudit"))
+        .env("XDG_CONFIG_HOME", &config_dir)
+        .arg("mcp")
+        .output()
+        .expect("run laudit mcp");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

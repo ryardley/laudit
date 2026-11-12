@@ -164,7 +164,16 @@ fn main() -> ExitCode {
         Some(Command::Explain { symbol }) => run_explain(cli.repo, cli.offline, cli.color, &symbol),
         Some(Command::Export(args)) => run_export(cli.repo, args),
         Some(Command::Ask { question }) => not_implemented("ask", &question),
-        Some(Command::Mcp) => not_implemented("mcp", &()),
+        Some(Command::Mcp) => {
+            report_prompt_install();
+            match laudit_mcp::run() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("laudit mcp: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some(Command::Outline) => not_implemented("outline", &()),
         Some(Command::Status { tour }) => run_status(cli.repo, cli.json, tour),
         Some(Command::Clear) => not_implemented("clear", &()),

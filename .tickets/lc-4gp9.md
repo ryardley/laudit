@@ -1,6 +1,6 @@
 ---
 id: lc-4gp9
-status: open
+status: closed
 deps: [lc-lz7a, lc-1yrq]
 links: []
 created: 2026-11-12T09:02:36Z
