@@ -1,6 +1,6 @@
 ---
 id: lc-5y5u
-status: open
+status: closed
 deps: [lc-n5h7, lc-lz7a, lc-1yrq]
 links: []
 created: 2026-11-12T09:02:36Z

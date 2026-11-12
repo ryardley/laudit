@@ -112,17 +112,6 @@ fn stubs_parse_documented_flags_and_exit_non_zero() {
             ".",
             "--json",
         ],
-        &[
-            "tour",
-            "--print",
-            "--uncommitted",
-            "--range",
-            "main..HEAD",
-            "--per-commit",
-            "--color",
-            "never",
-        ],
-        &["explain", "some_symbol"],
         &["export", "--md", "--out", "tour.md"],
         &["export", "--html"],
         &["ask", "what does this do?"],
@@ -381,4 +370,258 @@ fn status_without_artifacts_succeeds() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("parse status");
     assert_eq!(report["tour_present"], false);
     assert_eq!(report["stops"], 0);
+}
+
+fn sse_body(chunks: &[&str]) -> String {
+    let mut body = String::new();
+    for chunk in chunks {
+        let value = json!({
+            "choices": [{
+                "delta": { "content": chunk },
+                "finish_reason": null
+            }]
+        });
+        body.push_str(&format!("data: {value}\n\n"));
+    }
+    body.push_str("data: [DONE]\n\n");
+    body
+}
+
+async fn mount_narration(server: &MockServer, body: String) {
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(body),
+        )
+        .mount(server)
+        .await;
+}
+
+fn write_provider_config(repo: &Path, server: &MockServer) {
+    let path = repo.join(".laudit/config.toml");
+    fs::create_dir_all(path.parent().expect("config parent")).expect("create .laudit");
+    fs::write(
+        &path,
+        format!(
+            "[provider]\nbase_url = \"{}\"\nmodel = \"test-model\"\n",
+            server.uri()
+        ),
+    )
+    .expect("write config");
+}
+
+#[test]
+fn tour_print_offline_prints_structure_without_network() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &[
+            "tour",
+            "--print",
+            "--offline",
+            "--color",
+            "never",
+            "--repo",
+            &repo,
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "tour failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Chapter 1:"), "got: {stdout}");
+    assert!(stdout.contains("src/"), "got: {stdout}");
+    assert!(stdout.contains(':'), "got: {stdout}");
+    assert!(!stdout.contains('\u{1b}'), "unexpected ANSI: {stdout}");
+}
+
+#[tokio::test]
+async fn tour_print_narrates_with_mock_llm() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let server = MockServer::start().await;
+    mount_narration(
+        &server,
+        sse_body(&["TITLE: Program entry\nWHY: It starts the program.\n---\nThe body."]),
+    )
+    .await;
+    write_provider_config(temp.path(), &server);
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["tour", "--print", "--color", "never", "--repo", &repo],
+    );
+    assert!(
+        output.status.success(),
+        "tour failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Chapter 1:"), "got: {stdout}");
+    assert!(
+        stdout.contains("Why: It starts the program."),
+        "got: {stdout}"
+    );
+    assert!(stdout.contains("The body."), "got: {stdout}");
+}
+
+#[tokio::test]
+async fn explain_prints_grounded_explanation_with_mock_llm() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let server = MockServer::start().await;
+    mount_narration(
+        &server,
+        sse_body(&["TITLE: Program entry\nWHY: It starts the program.\n---\nThe body."]),
+    )
+    .await;
+    write_provider_config(temp.path(), &server);
+
+    let output = laudit_with_config_dir(&config_dir, &["explain", "main", "--repo", &repo]);
+    assert!(
+        output.status.success(),
+        "explain failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Program entry"), "got: {stdout}");
+    assert!(
+        stdout.contains("Why: It starts the program."),
+        "got: {stdout}"
+    );
+    assert!(stdout.contains("The body."), "got: {stdout}");
+}
+
+#[test]
+fn explain_ambiguous_query_lists_candidates_and_fails() {
+    let temp = TempDir::new();
+    fs::create_dir_all(temp.path().join("src")).expect("create src");
+    fs::write(temp.path().join("src/a.rs"), "pub fn dup() {}\n").expect("write a");
+    fs::write(temp.path().join("src/b.rs"), "pub fn dup() {}\n").expect("write b");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["explain", "dup", "--offline", "--repo", &repo],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ambiguous"), "got: {stderr}");
+    assert!(stderr.contains("src/a.rs"), "got: {stderr}");
+    assert!(stderr.contains("src/b.rs"), "got: {stderr}");
+}
+
+#[test]
+fn explain_unknown_symbol_fails() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["explain", "does_not_exist", "--offline", "--repo", &repo],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no symbol matches"), "got: {stderr}");
+}
+
+#[test]
+fn tour_print_color_always_emits_ansi_and_never_does_not() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(build.status.success());
+
+    let always = laudit_with_config_dir(
+        &config_dir,
+        &[
+            "tour",
+            "--print",
+            "--offline",
+            "--color",
+            "always",
+            "--repo",
+            &repo,
+        ],
+    );
+    assert!(always.status.success());
+    assert!(String::from_utf8_lossy(&always.stdout).contains('\u{1b}'));
+
+    let never = laudit_with_config_dir(
+        &config_dir,
+        &[
+            "tour",
+            "--print",
+            "--offline",
+            "--color",
+            "never",
+            "--repo",
+            &repo,
+        ],
+    );
+    assert!(never.status.success());
+    assert!(!String::from_utf8_lossy(&never.stdout).contains('\u{1b}'));
+}
+
+#[test]
+fn tour_rejects_unimplemented_source_adapters() {
+    let output = laudit(&["tour", "--print", "--uncommitted"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not implemented yet"), "got: {stderr}");
 }

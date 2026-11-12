@@ -262,6 +262,101 @@ pub async fn resume_from_artifacts(
     narrate_from_artifacts(repo_root, config, tour_id, client, sink).await
 }
 
+/// The structural artifacts narration needs.
+#[derive(Debug, Clone, Copy)]
+pub struct NarrationContext<'a> {
+    /// The recon skeleton.
+    pub skeleton: &'a Skeleton,
+    /// The codebase model.
+    pub model: &'a CodebaseModel,
+}
+
+/// A summary of narrating a single stop.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct StopNarrationReport {
+    /// The narrated stop.
+    pub stop: Stop,
+    /// Version of the narration prompt that was used.
+    pub prompt_version: String,
+    /// Symbol references that were dropped because they were not provided.
+    pub dropped_refs: Vec<DroppedRef>,
+    /// Human-readable warnings for dropped references.
+    pub warnings: Vec<String>,
+}
+
+/// Narrate a single stop without persisting a tour.
+///
+/// This is the engine entry point for `laudit explain`: it assembles the same
+/// layered context as a full tour, streams the body to `sink`, and updates
+/// `stop` in place. The caller decides whether to persist the stop.
+pub async fn narrate_stop(
+    repo_root: impl AsRef<Path>,
+    config: &Config,
+    context: NarrationContext<'_>,
+    chapter: &TourChapter,
+    stop: &mut Stop,
+    client: &LlmClient,
+    sink: &mut dyn NarrationSink,
+) -> Result<StopNarrationReport, NarrationError> {
+    let repo_root = repo_root.as_ref();
+    let index = load_index(repo_root).ok().flatten();
+    let (prompt, prompt_version) = load_prompt();
+    let mut redactor = Redactor::new(&config.redaction)?;
+    let outline = json!({
+        "chapters": [{
+            "id": chapter.id,
+            "title": chapter.title,
+            "stops": chapter.stops.iter().map(|stop| json!({
+                "id": stop.id,
+                "title": stop.title,
+                "file": stop.file,
+                "start_line": stop.start_line,
+                "end_line": stop.end_line,
+            })).collect::<Vec<_>>(),
+        }],
+    });
+    let current_hash = cache::file_hash(repo_root, &stop.file).unwrap_or_default();
+
+    let outcome = {
+        let mut narrator = Narrator {
+            repo_root,
+            skeleton: context.skeleton,
+            model: context.model,
+            index: index.as_ref(),
+            outline: &outline,
+            prompt: &prompt,
+            client,
+            redactor: &mut redactor,
+            sink,
+        };
+        narrator.narrate_stop(chapter, stop).await
+    };
+
+    match outcome {
+        Ok(narrated) => {
+            stop.title = narrated.title;
+            stop.why_here = narrated.why;
+            stop.explanation = narrated.body;
+            stop.refs = narrated.refs;
+            stop.file_hash = current_hash;
+            stop.status = StopStatus::Explained;
+            write_redactions(repo_root, &redactor)?;
+            Ok(StopNarrationReport {
+                stop: stop.clone(),
+                prompt_version,
+                dropped_refs: narrated.dropped_refs,
+                warnings: narrated.warnings,
+            })
+        }
+        Err(reason) => {
+            stop.file_hash = current_hash;
+            stop.status = StopStatus::Skipped;
+            write_redactions(repo_root, &redactor)?;
+            Err(NarrationError::StopFailed(reason))
+        }
+    }
+}
+
 struct Narrator<'a> {
     repo_root: &'a Path,
     skeleton: &'a Skeleton,
@@ -853,6 +948,8 @@ pub enum NarrationError {
     InvalidSkeleton(String),
     /// The persisted model is not usable.
     InvalidModel(String),
+    /// A single stop failed to narrate.
+    StopFailed(String),
 }
 
 impl fmt::Display for NarrationError {
@@ -866,6 +963,7 @@ impl fmt::Display for NarrationError {
             Self::Plan(error) => write!(f, "{error}"),
             Self::InvalidSkeleton(message) => write!(f, "invalid skeleton: {message}"),
             Self::InvalidModel(message) => write!(f, "invalid model: {message}"),
+            Self::StopFailed(message) => write!(f, "narration failed: {message}"),
         }
     }
 }
@@ -877,7 +975,7 @@ impl std::error::Error for NarrationError {
             Self::Serialize(error) => Some(error),
             Self::Redact(error) => Some(error),
             Self::Plan(error) => Some(error),
-            Self::InvalidSkeleton(_) | Self::InvalidModel(_) => None,
+            Self::InvalidSkeleton(_) | Self::InvalidModel(_) | Self::StopFailed(_) => None,
         }
     }
 }

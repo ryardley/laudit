@@ -228,6 +228,19 @@ fn skeleton(
     }
 }
 
+/// Build the placeholder codebase model for a skeleton.
+///
+/// This is the model written by an offline build. It is also used by offline
+/// frontends that need a model to plan a tour but have not run comprehension.
+#[must_use]
+pub fn offline_model(skeleton: &Skeleton) -> CodebaseModel {
+    placeholder_model(
+        skeleton.repo_id.clone(),
+        skeleton.head.clone(),
+        skeleton.dirty_hash.clone(),
+    )
+}
+
 fn placeholder_model(repo_id: String, head: Option<String>, dirty_hash: String) -> CodebaseModel {
     CodebaseModel {
         schema_version: SCHEMA_VERSION,

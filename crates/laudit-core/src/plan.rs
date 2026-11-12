@@ -131,6 +131,21 @@ pub fn plan_from_artifacts(
     plan(repo_root, config, &skeleton, &model, options)
 }
 
+/// Build a single stop anchored to `symbol` using the same range rules as a
+/// planned tour.
+///
+/// This is used by `laudit explain`, which may need a stop for a symbol that is
+/// not part of the current tour (for example a test symbol or a symbol outside
+/// the configured budgets).
+pub fn stop_for_symbol(
+    repo_root: impl AsRef<Path>,
+    skeleton: &Skeleton,
+    symbol: &SymbolNode,
+) -> Result<Stop, PlanError> {
+    let builder = Builder::new(repo_root.as_ref(), skeleton, 0);
+    builder.make_stop(symbol, "Requested symbol.")
+}
+
 /// Load a persisted tour artifact.
 pub fn load_tour(repo_root: impl AsRef<Path>, tour_id: &str) -> Result<Tour, PlanError> {
     let path = tour_path(repo_root.as_ref(), tour_id);
@@ -212,7 +227,8 @@ fn validate_stop(repo_root: &Path, stop: &Stop) -> Result<(), PlanError> {
     Ok(())
 }
 
-fn load_skeleton(repo_root: &Path) -> Result<Skeleton, PlanError> {
+/// Load the persisted structural skeleton artifact.
+pub fn load_skeleton(repo_root: &Path) -> Result<Skeleton, PlanError> {
     let path = repo_root.join(SKELETON_FILE);
     let bytes = fs::read(&path).map_err(|source| PlanError::Io {
         path: path.clone(),
@@ -225,7 +241,8 @@ fn load_skeleton(repo_root: &Path) -> Result<Skeleton, PlanError> {
     Ok(skeleton)
 }
 
-fn load_model(repo_root: &Path) -> Result<CodebaseModel, PlanError> {
+/// Load the persisted codebase model artifact.
+pub fn load_model(repo_root: &Path) -> Result<CodebaseModel, PlanError> {
     let path = repo_root.join(MODEL_FILE);
     let bytes = fs::read(&path).map_err(|source| PlanError::Io {
         path: path.clone(),

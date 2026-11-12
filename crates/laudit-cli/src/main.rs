@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -159,8 +160,8 @@ fn main() -> ExitCode {
         }
         Some(Command::Prompts(args)) => run_prompts(args),
         Some(Command::Build(args)) => run_build(cli.repo, cli.offline, cli.json, args),
-        Some(Command::Tour(args)) => not_implemented("tour", &args),
-        Some(Command::Explain { symbol }) => not_implemented("explain", &symbol),
+        Some(Command::Tour(args)) => run_tour(cli.repo, cli.offline, cli.color, args),
+        Some(Command::Explain { symbol }) => run_explain(cli.repo, cli.offline, cli.color, &symbol),
         Some(Command::Export(args)) => not_implemented("export", &args),
         Some(Command::Ask { question }) => not_implemented("ask", &question),
         Some(Command::Mcp) => not_implemented("mcp", &()),
@@ -284,6 +285,273 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
             eprintln!("laudit build: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn run_tour(repo: Option<PathBuf>, offline: bool, color: ColorChoice, args: TourArgs) -> ExitCode {
+    if args.uncommitted || args.range.is_some() || args.per_commit {
+        eprintln!("laudit tour: source adapters are not implemented yet");
+        return ExitCode::FAILURE;
+    }
+    if !args.print {
+        eprintln!("laudit tour: interactive tours are not implemented yet; use --print");
+        return ExitCode::FAILURE;
+    }
+
+    let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
+    let color_enabled = color_enabled(color);
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if offline {
+        let config = match laudit_core::config::Config::load_offline(&repo_root) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let mut sink = laudit_core::narration::NoopSink;
+        return match runtime.block_on(laudit_core::print::prepare(
+            &repo_root, &config, true, None, &mut sink,
+        )) {
+            Ok(prepared) => {
+                print!(
+                    "{}",
+                    laudit_core::print::render(
+                        &prepared.tour,
+                        laudit_core::print::PrintOptions {
+                            color: color_enabled,
+                            offline: true,
+                        },
+                    )
+                );
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
+    report_prompt_install();
+    let config = match laudit_core::config::Config::load(&repo_root) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let client = match laudit_core::llm::LlmClient::from_config(&config) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let mut sink = laudit_core::narration::NoopSink;
+    match runtime.block_on(laudit_core::print::prepare(
+        &repo_root,
+        &config,
+        false,
+        Some(&client),
+        &mut sink,
+    )) {
+        Ok(prepared) => {
+            for warning in &prepared.warnings {
+                eprintln!("laudit: warning: {warning}");
+            }
+            print!(
+                "{}",
+                laudit_core::print::render(
+                    &prepared.tour,
+                    laudit_core::print::PrintOptions {
+                        color: color_enabled,
+                        offline: false,
+                    },
+                )
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_explain(repo: Option<PathBuf>, offline: bool, color: ColorChoice, symbol: &str) -> ExitCode {
+    let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
+    let color_enabled = color_enabled(color);
+
+    if offline {
+        let config = match laudit_core::config::Config::load_offline(&repo_root) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("laudit explain: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let skeleton = match laudit_core::explain::load_skeleton(&repo_root, &config) {
+            Ok(skeleton) => skeleton,
+            Err(error) => {
+                eprintln!("laudit explain: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let resolved = match laudit_core::explain::resolve(&skeleton, symbol) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                eprintln!("laudit explain: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let Some(node) = skeleton.symbols.iter().find(|node| node.id == resolved.id) else {
+            eprintln!(
+                "laudit explain: symbol {} is no longer in the index",
+                resolved.id
+            );
+            return ExitCode::FAILURE;
+        };
+        let stop = match laudit_core::plan::stop_for_symbol(&repo_root, &skeleton, node) {
+            Ok(stop) => stop,
+            Err(error) => {
+                eprintln!("laudit explain: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        print_explain_offline(&resolved, &stop, color_enabled);
+        return ExitCode::SUCCESS;
+    }
+
+    report_prompt_install();
+    let config = match laudit_core::config::Config::load(&repo_root) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("laudit explain: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let client = match laudit_core::llm::LlmClient::from_config(&config) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("laudit explain: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let skeleton = match laudit_core::explain::load_skeleton(&repo_root, &config) {
+        Ok(skeleton) => skeleton,
+        Err(error) => {
+            eprintln!("laudit explain: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let model = match laudit_core::explain::load_model(&repo_root) {
+        Ok(model) => model,
+        Err(error) => {
+            eprintln!("laudit explain: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let resolved = match laudit_core::explain::resolve(&skeleton, symbol) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            eprintln!("laudit explain: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("laudit explain: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let mut sink = laudit_core::narration::NoopSink;
+    match runtime.block_on(laudit_core::explain::explain(
+        &repo_root, &config, &skeleton, &model, &resolved, &client, &mut sink,
+    )) {
+        Ok(report) => {
+            for warning in &report.warnings {
+                eprintln!("laudit: warning: {warning}");
+            }
+            print_explain(&report, color_enabled);
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("laudit explain: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn color_enabled(color: ColorChoice) -> bool {
+    match color {
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+        ColorChoice::Auto => std::io::stdout().is_terminal(),
+    }
+}
+
+fn print_explain(report: &laudit_core::explain::ExplainReport, color: bool) {
+    let stop = &report.stop;
+    let title = if stop.title.is_empty() {
+        &stop.symbol_id
+    } else {
+        &stop.title
+    };
+    let location = format!("{}:{}-{}", stop.file, stop.start_line, stop.end_line);
+    if color {
+        println!("\x1b[1m{title}\x1b[0m");
+        println!("\x1b[2m{location}\x1b[0m");
+    } else {
+        println!("{title}");
+        println!("{location}");
+    }
+    if !stop.why_here.is_empty() {
+        println!();
+        println!("Why: {}", stop.why_here);
+    }
+    if !stop.explanation.is_empty() {
+        println!();
+        print!("{}", stop.explanation);
+        if !stop.explanation.ends_with('\n') {
+            println!();
+        }
+    }
+}
+
+fn print_explain_offline(
+    symbol: &laudit_core::explain::ResolvedSymbol,
+    stop: &laudit_core::model::Stop,
+    color: bool,
+) {
+    let title = if stop.title.is_empty() {
+        &symbol.name
+    } else {
+        &stop.title
+    };
+    let location = format!("{}:{}-{}", stop.file, stop.start_line, stop.end_line);
+    if color {
+        println!("\x1b[1m{title}\x1b[0m");
+        println!("\x1b[2m{location}\x1b[0m");
+    } else {
+        println!("{title}");
+        println!("{location}");
     }
 }
 
