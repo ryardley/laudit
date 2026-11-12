@@ -297,20 +297,24 @@ impl Config {
     }
 }
 
-/// The global config path, if a home directory can be determined.
+/// The global config directory, if a home directory can be determined.
+///
+/// This is `$XDG_CONFIG_HOME/laudit` when `XDG_CONFIG_HOME` is set, otherwise
+/// `$HOME/.config/laudit`.
 #[must_use]
-pub fn global_config_path() -> Option<PathBuf> {
+pub fn global_config_dir() -> Option<PathBuf> {
     if let Some(xdg) = env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
-        return Some(PathBuf::from(xdg).join("laudit").join("config.toml"));
+        return Some(PathBuf::from(xdg).join("laudit"));
     }
     env::var_os("HOME")
         .filter(|value| !value.is_empty())
-        .map(|home| {
-            PathBuf::from(home)
-                .join(".config")
-                .join("laudit")
-                .join("config.toml")
-        })
+        .map(|home| PathBuf::from(home).join(".config").join("laudit"))
+}
+
+/// The global config path, if a home directory can be determined.
+#[must_use]
+pub fn global_config_path() -> Option<PathBuf> {
+    global_config_dir().map(|dir| dir.join("config.toml"))
 }
 
 /// The per-repo config path for `repo_root`.
