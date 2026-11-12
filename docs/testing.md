@@ -9,7 +9,7 @@ No test may require network access (D21).
 | Unit | `crates/laudit-core/src/**` `#[cfg(test)]` | graph, PageRank, redaction, grammar extraction, schema round-trips, config precedence, plan validation. |
 | Integration | `crates/laudit-core/tests/` | full pipeline against fixture repos with a mock LLM. |
 | Golden | `crates/laudit-core/tests/` using `insta` | `model.json` and `tour.json` snapshots. |
-| Protocol | `crates/laudit-core/tests/` | drive `laudit serve` over stdio JSON-RPC. |
+| Protocol | `crates/laudit-cli/tests/serve.rs`, `crates/laudit-core/src/rpc/` | drive `laudit serve` over stdio JSON-RPC. |
 | Plugin | `tests/nvim/` | headless Neovim with a fake engine. |
 
 ## Fixtures
@@ -21,6 +21,10 @@ No test may require network access (D21).
 - `git-repo/` — a repo with a few commits for provenance and adapter tests.
 - `secrets/` — files containing fake AWS/GitHub/JWT/PEM/env secrets for
   redaction tests (never real secrets).
+
+`crates/laudit-core/tests/fixtures/` holds the recon fixtures used by the
+engine integration tests (`graph-tree/`, `parse-tree/`, `walk-tree/`,
+`entrypoints/`, `git-repo/`).
 
 ## Mock LLM
 
@@ -40,9 +44,9 @@ must be stable across runs (deterministic recon; mocked LLM).
 
 - A fake engine script speaks the JSON-RPC protocol with canned responses and
   notifications.
-- Tests (plenary or busted) cover: `setup`, health, tour start, advance, return,
-  resume, outline.
-- Run with `nvim --headless`.
+- Plain Lua test scripts cover: `setup`, health, RPC client, tour UI, commands,
+  and error paths.
+- Run with `make test-nvim` (each script via `nvim --headless -u NONE -l`).
 
 ## CI
 

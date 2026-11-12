@@ -109,12 +109,13 @@ Order:
 3. Optional auto-download (opt-in) of the matching release artifact into a
    plugin data dir, verified against the checksum.
 
-Auto-download is off by default. When enabled, the plugin selects the artifact
-for the current OS/architecture (`x86_64`/`aarch64` × `gnu`/`musl`), downloads
-the tarball and its `.sha256` from the matching GitHub Release, verifies the
-checksum, extracts `laudit` into the plugin data directory, and executes it from
-there. A checksum mismatch aborts the install and leaves any existing binary
-untouched.
+Auto-download is off by default (`setup({ auto_download = false })`). The Lua
+frontend exposes the opt-in seam but does not perform the download itself:
+network I/O must happen in Rust (architecture invariant 2), and the Rust-side
+installer is not implemented yet. Enabling `auto_download` therefore reports a
+clear "auto-download is not available in the Lua frontend" error and leaves any
+existing binary untouched. Install `laudit` from a release or the Nix flake, or
+set `setup({ binary = ... })`, until the installer lands.
 
 ## Source fallback
 

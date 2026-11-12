@@ -6,21 +6,23 @@ All frontends are thin layers over `laudit-core`. The engine is CLI-first (D23).
 
 | Command | Purpose |
 |---|---|
-| `laudit build [--offline] [--check] [--quiet] [--repo <path>] [--json]` | Run recon (+ comprehension/plan unless `--offline`). `--check` exits non-zero if artifacts are stale. |
+| `laudit build [--offline] [--check] [--quiet] [--include-tests] [--skip-config]` | Run recon (+ comprehension/plan unless `--offline`). `--check` exits non-zero if artifacts are stale. |
 | `laudit serve` | Start the JSON-RPC 2.0 stdio server (see `docs/protocol.md`). |
-| `laudit tour [--print] [--uncommitted] [--range <base..head>] [--per-commit] [--color auto\|always\|never]` | Run/print a tour. `--print` is pipe-friendly. |
+| `laudit tour [--print]` | Run the interactive TUI, or print the tour with `--print`. |
 | `laudit explain <symbol>` | Print a grounded explanation for one symbol. |
 | `laudit export --md [--out <path>]` | Render a tour to markdown. |
 | `laudit export --html [--out <dir\|file>]` | Render a tour to a self-contained HTML document. |
-| `laudit ask [<question>]` | Grounded Q&A over the codebase model; REPL when no question. |
 | `laudit mcp` | Start the MCP stdio server. |
-| `laudit outline` | Print the tour outline. |
-| `laudit status` | Report model/tour presence and counts. |
-| `laudit prompts` | List/print installed prompts. |
-| `laudit clear` | Remove generated artifacts (with confirmation). |
+| `laudit status [--tour <id>]` | Report model/tour presence and counts. |
+| `laudit prompts [<name>] [--list] [--all]` | List/print installed prompts. |
 
 Global flags: `--repo <path>`, `--offline`, `--json`, `--color`, `--version`,
 `--help`.
+
+Reserved but not yet implemented: `laudit ask`, `laudit outline`, `laudit clear`,
+and the source-adapter flags `tour --uncommitted`, `tour --range <base..head>`,
+and `tour --per-commit`. They parse their documented flags and exit non-zero with
+"not implemented yet".
 
 ## Terminal TUI (`laudit tour`)
 
@@ -44,6 +46,10 @@ Full-screen ratatui + crossterm layout:
 - Runs in-process against the engine (no RPC).
 - Restores the terminal on exit and on panic.
 - Handles resize.
+- Keys: `n`/`p` next/previous, `o` outline, `g` return to current stop, `r`
+  retry narration, `j`/`k` scroll the code pane, `PageUp`/`PageDown` scroll a
+  page, `Home`/`End` jump, `q` quit. In the outline overlay: `j`/`k` move,
+  `Enter` select, `Esc` close, `q` quit.
 
 ## Neovim plugin (`lua/laudit/`)
 
@@ -51,7 +57,7 @@ Thin UI over `laudit serve` (D6, D14).
 
 ### Commands
 
-`:Laudit tour | resume | stop | outline | next | prev | return | model | explain | status | clear`
+`:Laudit tour | resume | stop | outline | next | prev | return | model | explain | status | clear | health`
 
 ### Default keymaps (`<leader>l`, global, disable-able)
 
@@ -81,9 +87,10 @@ Thin UI over `laudit serve` (D6, D14).
 
 ```lua
 require('laudit').setup({
-  binary = nil,          -- explicit path; else $PATH; else optional auto-download
+  binary = nil,          -- explicit path; else $PATH
   split = { side = 'right', size = 40 },
   keymaps = true,        -- install default <leader>l maps
+  auto_download = false, -- opt-in seam; not implemented in the Lua frontend yet
 })
 ```
 

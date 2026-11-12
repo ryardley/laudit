@@ -12,14 +12,16 @@ not configure the engine.
 ## Schema
 
 ```toml
+# Top-level keys (not under [provider]).
+roots = ["."]                             # monorepo: multiple roots
+languages = ["rust", "typescript", "javascript", "bash", "toml", "yaml", "json", "markdown", "sql"]
+excludes = ["vendor/", "dist/"]           # in addition to .gitignore
+
 [provider]
 base_url = "https://api.openai.com/v1"   # any OpenAI-compatible endpoint
 model = "gpt-4o-mini"                     # REQUIRED, no hidden default
 api_key_env = "OPENAI_API_KEY"            # optional indirection
-
-roots = ["."]                             # monorepo: multiple roots
-languages = ["rust", "typescript", "javascript", "bash", "toml", "yaml", "json", "markdown", "sql"]
-excludes = ["vendor/", "dist/"]           # in addition to .gitignore
+api_key = "sk-..."                        # optional stored key (prefer env)
 
 [redaction]
 extra_rules = []                          # additional regexes
@@ -30,6 +32,11 @@ max_stops_per_chapter = 12
 max_context_tokens = 12000
 ```
 
+`roots`, `languages`, and `excludes` are top-level keys. Placing them under
+`[provider]` is silently ignored by the loader, so keep them above the first
+table header. `roots` and `languages` replace the global value when set in the
+repo config; `excludes` likewise replaces rather than appends.
+
 ## API key resolution (D17)
 
 Order, first match wins:
@@ -38,8 +45,10 @@ Order, first match wins:
 2. Global config (if a key is stored there).
 3. Per-repo config.
 
-`model` is required; a missing model is a clear error. Local endpoints
-(`localhost`/`127.0.0.1`) require no key.
+`model` is required for LLM-backed commands; a missing model is a clear error.
+Local endpoints (`localhost`/`127.0.0.1`/`::1`/`0.0.0.0`) require no key.
+`laudit build --offline`, `laudit tour --print --offline`, and `laudit build
+--offline --check` do not require a model.
 
 ## Redaction (D11)
 

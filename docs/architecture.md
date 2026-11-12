@@ -40,8 +40,8 @@ Cargo workspace at the repository root.
 
 | Crate | Kind | Responsibility |
 |---|---|---|
-| `crates/laudit-core` | lib | All engine logic: recon, graph, redaction, config, artifacts, LLM client, comprehension, plan, narration, export, source adapters, RPC server, ask. |
-| `crates/laudit-cli` | bin `laudit` | CLI surface: `build`, `serve`, `explain`, `tour`, `export`, `ask`, `mcp`, `outline`, `status`, `prompts`, `clear`. |
+| `crates/laudit-core` | lib | All engine logic: recon, graph, redaction, config, artifacts, LLM client, comprehension, plan, narration, cache, explain, print, export, status, RPC server. |
+| `crates/laudit-cli` | bin `laudit` | CLI surface: `build`, `serve`, `explain`, `tour`, `export`, `mcp`, `status`, `prompts` (plus reserved `ask`, `outline`, `clear`). |
 | `crates/laudit-tui` | bin/lib | Interactive terminal tour (ratatui + crossterm). Added by the TUI ticket. |
 | `crates/laudit-mcp` | bin/lib | MCP stdio server exposing engine tools to AI agents. Added by the MCP ticket. |
 
@@ -66,7 +66,9 @@ and 3 call the LLM.
 6. **index** — persist a content-hash incremental index under `.laudit/index/`.
 
 Output: a structural skeleton (files, symbols, communities, entrypoints, ranked
-order, provenance). This is the spine the LLM narrates.
+order, provenance), persisted as `.laudit/skeleton.json`. This is the spine the
+LLM narrates. `laudit build --offline` writes the skeleton plus a placeholder
+`.laudit/model.json` and never calls the LLM.
 
 ### Stage 1 — Comprehension (LLM, cached)
 
@@ -109,15 +111,51 @@ skip + warn and mark the stop. Persist prose into the tour artifact.
 | `recon::entrypoints` | Entrypoint detection. |
 | `recon::git` | Provenance mining. |
 | `recon::index` | Content-hash incremental index. |
+| `build` | Offline Stage 0 build and `--check` freshness verification. |
 | `llm` | OpenAI-compatible client (structured output, streaming, retry). |
 | `prompts` | Embedded prompts, first-run install, versioning. |
 | `comprehension` | Stage 1. |
 | `plan` | Stage 2. |
 | `narration` | Stage 3. |
-| `source` | Source adapters (whole codebase now; uncommitted/rev-range later). |
+| `cache` | Per-stop content hashes, invalidation, resume position. |
+| `explain` | Single-symbol grounded explanation. |
+| `print` | Pipe-friendly tour rendering. |
 | `export` | Markdown and HTML rendering. |
-| `ask` | Grounded Q&A over the model. |
+| `status` | Read-only model/tour presence and stop counts. |
 | `rpc` | JSON-RPC 2.0 stdio server. |
+
+Source adapters (uncommitted/rev-range) and grounded Q&A (`ask`) are planned
+modules; they are not part of the current engine.
+
+## Artifacts
+
+All durable state lives under `.laudit/` and is versioned JSON stamped with
+`schema_version` and `tool_version` (D16). The layout is:
+
+```
+.laudit/
+  .gitignore          # ignores index/
+  config.toml         # per-repo config
+  skeleton.json       # Stage 0 structure
+  model.json          # Stage 1 codebase model
+  tours/<id>.json     # Stage 2 plan + Stage 3 prose + position
+  redactions.json     # placeholder map (never contains secrets)
+  index/              # machine-local parse/graph cache
+```
+
+`skeleton.json`, `model.json`, `tours/`, and `redactions.json` are committable;
+`index/` is machine-local and git-ignored. See `docs/artifacts.md` for schemas
+and invalidation rules.
+
+## RPC
+
+`laudit serve` exposes the engine over newline-delimited JSON-RPC 2.0 on stdio.
+The Neovim plugin and other frontends drive it with `ping`, `status`,
+`build_tour`, `resume_tour`, `explain_stop`, `get_outline`, `set_position`, and
+`cancel`, and receive `progress`, `comprehension_done`, `stop_ready`,
+`explanation_chunk`, and `error` notifications. Logs go to stderr; stdout is the
+protocol channel. `laudit mcp` exposes the same handlers as MCP tools. See
+`docs/protocol.md` for the full method and error tables.
 
 ## Firm invariants
 
