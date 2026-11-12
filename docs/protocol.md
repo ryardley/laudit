@@ -22,10 +22,12 @@ Both are thin layers over the same `laudit-core` handlers.
 | Method | Params | Result |
 |---|---|---|
 | `ping` | `{}` | `{ "pong": true, "version": "0.1.0" }` |
-| `status` | `{ "tour_id"?: string }` | `{ "engine": "ok", "tour"?: {…counts…} }` |
+| `status` | `{ "tour_id"?: string, "repo"?: string }` | `{ "engine": "ok", "tour"?: {…counts…} }` |
 | `build_tour` | `{ "repo": string, "offline"?: bool, "source"?: {…} }` | `{ "tour_id": string }` |
+| `resume_tour` | `{ "repo": string, "tour_id"?: string }` | `{ "tour_id": string, "position": { "chapter": number, "stop": number } }` |
 | `explain_stop` | `{ "tour_id": string, "stop_id": string }` | `{ "stop_id": string }` (prose streams via notifications) |
-| `get_outline` | `{ "tour_id": string }` | `{ "chapters": [ {id,title,stops:[{id,title,file,start_line,end_line}]} ] }` |
+| `get_outline` | `{ "tour_id": string }` | `{ "chapters": [ {id,title,stops:[{id,title,why_here,file,start_line,end_line,explanation,status}]} ] }` |
+| `set_position` | `{ "tour_id": string, "chapter": number, "stop": number }` | `{ "position": { "chapter": number, "stop": number } }` |
 | `cancel` | `{ "tour_id": string, "stop_id"?: string }` | `{ "cancelled": true }` |
 
 ### Notifications (engine → client)

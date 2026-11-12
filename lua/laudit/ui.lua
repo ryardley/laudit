@@ -39,6 +39,7 @@ local state = {
   subscriptions = {},
   request_explain = false,
   explaining = {},
+  pending_position = nil,
 }
 
 local function notify(message, level)
@@ -119,6 +120,7 @@ local function reset_state()
   state.code_win = nil
   state.request_explain = false
   state.explaining = {}
+  state.pending_position = nil
 end
 
 local function ensure_code_win()
@@ -274,6 +276,17 @@ local function set_extmark(buf, stop)
   state.extmark_buf = buf
 end
 
+local function persist_position(stop)
+  if not state.tour_id or not rpc.is_running() then
+    return
+  end
+  rpc.request("set_position", {
+    tour_id = state.tour_id,
+    chapter = math.max(0, (stop.chapter_index or 1) - 1),
+    stop = math.max(0, (stop.stop_index or 1) - 1),
+  }, function() end)
+end
+
 local function show_current()
   local stop = state.stops[state.current]
   if not stop then
@@ -282,6 +295,7 @@ local function show_current()
 
   state.stop = stop
   state.explanation = state.chunks[stop.id] or stop.explanation or ""
+  persist_position(stop)
 
   ensure_split()
   local buf = open_stop(stop)
@@ -337,10 +351,43 @@ local function flatten_outline(chapters)
         stop_index = stop_index,
         stop_count = #chapter_stops,
         explanation = meta.explanation or stop.explanation or "",
+        status = stop.status,
       }
     end
   end
   return stops
+end
+
+local function flat_index_for_position(chapters, position)
+  if not position then
+    return nil
+  end
+  local flat = 0
+  for chapter_index, chapter in ipairs(chapters or {}) do
+    for stop_index, _ in ipairs(chapter.stops or {}) do
+      if
+        (chapter_index - 1) == (position.chapter or 0)
+        and (stop_index - 1) == (position.stop or 0)
+      then
+        return flat + 1
+      end
+      flat = flat + 1
+    end
+  end
+  return nil
+end
+
+local function show_scratch(name, lines, filetype)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = filetype or ""
+  pcall(vim.api.nvim_buf_set_name, buf, name)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.cmd("botright split")
+  vim.api.nvim_win_set_buf(0, buf)
 end
 
 local function load_outline(tour_id, cb)
@@ -386,7 +433,9 @@ local function load_outline(tour_id, cb)
         return
       end
 
-      state.current = 1
+      local saved_index = flat_index_for_position(state.chapters, state.pending_position)
+      state.pending_position = nil
+      state.current = saved_index or 1
       if previous_id then
         for index, stop in ipairs(state.stops) do
           if stop.id == previous_id then
@@ -510,7 +559,7 @@ end
 
 --- Start a tour. With `opts.tour_id`, resume that tour; otherwise ask the
 --- engine to build a new one.
----@param opts table|nil { repo?, offline?, tour_id?, explain? }
+---@param opts table|nil { repo?, offline?, tour_id?, explain?, position? }
 function M.start(opts)
   opts = opts or {}
   local repo = opts.repo or vim.fn.getcwd()
@@ -524,6 +573,7 @@ function M.start(opts)
   state.repo = repo
   state.offline = offline
   state.request_explain = opts.explain == true or (tour_id ~= nil and opts.explain ~= false)
+  state.pending_position = opts.position
   subscribe()
 
   if tour_id then
@@ -547,6 +597,196 @@ function M.start(opts)
     state.tour_id = result.tour_id
     load_outline(result.tour_id, show_current)
   end)
+end
+
+--- Resume the most recent tour (or `opts.tour_id`) from its saved position.
+---@param opts table|nil { repo?, tour_id? }
+function M.resume(opts)
+  opts = opts or {}
+  local repo = opts.repo or vim.fn.getcwd()
+  rpc.request("resume_tour", { repo = repo, tour_id = opts.tour_id }, function(err, result)
+    if err then
+      notify("failed to resume tour: " .. (err.message or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+    if not result or not result.tour_id then
+      notify("engine did not return a tour id", vim.log.levels.ERROR)
+      return
+    end
+    M.start({
+      repo = repo,
+      tour_id = result.tour_id,
+      position = result.position,
+      offline = opts.offline == true,
+      explain = true,
+    })
+  end)
+end
+
+--- Labels for the outline picker, one per stop.
+---@return string[]
+function M.outline_items()
+  local items = {}
+  for index, stop in ipairs(state.stops) do
+    local title = stop.title ~= "" and stop.title or stop.id
+    items[#items + 1] = string.format(
+      "%d. [%s] %s — %s:%d",
+      index,
+      stop.chapter_title or "",
+      title,
+      stop.file or "",
+      stop.start_line or 0
+    )
+  end
+  return items
+end
+
+--- Jump to a flat stop index from the outline. Returns false when out of range.
+---@param index integer
+---@return boolean
+function M.outline_select(index)
+  if not state.active or #state.stops == 0 then
+    return false
+  end
+  index = tonumber(index)
+  if not index or index < 1 or index > #state.stops then
+    return false
+  end
+  M.show_stop(index)
+  return true
+end
+
+--- Open the outline picker and jump to the chosen chapter/stop.
+function M.outline()
+  if not state.active or #state.stops == 0 then
+    notify("no active tour; start one with :Laudit tour")
+    return
+  end
+  local items = M.outline_items()
+  vim.ui.select(items, { prompt = "laudit outline" }, function(_, index)
+    if index then
+      M.outline_select(index)
+    end
+  end)
+end
+
+--- Show the codebase model artifact.
+---@param opts table|nil { repo? }
+function M.model(opts)
+  opts = opts or {}
+  local repo = opts.repo or vim.fn.getcwd()
+  local path = repo .. "/.laudit/model.json"
+  if vim.fn.filereadable(path) == 0 then
+    notify("no model artifact at " .. path .. "; run :Laudit tour or laudit build")
+    return
+  end
+  show_scratch("laudit://model", vim.fn.readfile(path), "json")
+end
+
+--- Explain the current stop, or a symbol via the engine CLI.
+---@param args table|string|nil
+function M.explain(args)
+  local fargs = type(args) == "table" and args.fargs or {}
+  local symbol = fargs[2]
+  if symbol and symbol ~= "" then
+    local resolved = config.resolve_binary()
+    if not resolved.found then
+      notify("laudit binary not found", vim.log.levels.ERROR)
+      return
+    end
+    local repo = vim.fn.getcwd()
+    local output = vim.fn.system({ resolved.path, "explain", symbol, "--repo", repo })
+    if vim.v.shell_error ~= 0 then
+      notify("explain failed: " .. output, vim.log.levels.ERROR)
+      return
+    end
+    show_scratch("laudit://explain", vim.split(output, "\n", { plain = true }), "markdown")
+    return
+  end
+
+  if not state.active or not state.stop then
+    notify("no active tour; use :Laudit explain <symbol> or start a tour")
+    return
+  end
+  local stop = state.stop
+  if state.explanation ~= "" then
+    notify("current stop is already explained")
+    return
+  end
+  state.explaining[stop.id] = true
+  rpc.request("explain_stop", { tour_id = state.tour_id, stop_id = stop.id }, function(err)
+    state.explaining[stop.id] = nil
+    if err then
+      notify("failed to explain stop: " .. (err.message or "unknown error"))
+    end
+  end)
+end
+
+--- Report engine and tour status.
+---@param opts table|nil { repo? }
+function M.status(opts)
+  opts = opts or {}
+  local repo = opts.repo or vim.fn.getcwd()
+  rpc.request("status", { repo = repo, tour_id = state.tour_id }, function(err, result)
+    if err then
+      notify("status failed: " .. (err.message or "unknown error"), vim.log.levels.ERROR)
+      return
+    end
+    local lines = { "laudit status" }
+    lines[#lines + 1] = "  engine: " .. tostring(result.engine or "unknown")
+    local tour = result.tour
+    if tour then
+      lines[#lines + 1] = "  model: " .. (tour.model_present and "present" or "missing")
+      lines[#lines + 1] = "  tour: "
+        .. (tour.tour_present and (tour.tour_id or "present") or "missing")
+      if tour.tour_present then
+        lines[#lines + 1] = string.format("  chapters: %d", tour.chapters or 0)
+        lines[#lines + 1] = string.format("  stops: %d", tour.stops or 0)
+        lines[#lines + 1] = string.format("  explained: %d", tour.explained or 0)
+        lines[#lines + 1] = string.format("  pending: %d", tour.pending or 0)
+        lines[#lines + 1] = string.format("  skipped: %d", tour.skipped or 0)
+        lines[#lines + 1] = string.format("  failed: %d", tour.failed or 0)
+        lines[#lines + 1] = string.format("  stale: %d", tour.stale or 0)
+        if tour.position then
+          lines[#lines + 1] = string.format(
+            "  position: %d:%d",
+            tour.position.chapter,
+            tour.position.stop
+          )
+        end
+      end
+    end
+    vim.api.nvim_echo({ { table.concat(lines, "\n"), "None" } }, true, {})
+  end)
+end
+
+--- Remove generated artifacts under `.laudit/` after confirmation.
+---@param opts table|nil { repo?, force?, yes? }
+function M.clear(opts)
+  opts = opts or {}
+  local repo = opts.repo or vim.fn.getcwd()
+  local base = repo .. "/.laudit"
+  if vim.fn.isdirectory(base) == 0 then
+    notify("no .laudit directory in " .. repo)
+    return
+  end
+  if not (opts.force or opts.yes) then
+    local choice = vim.fn.confirm("Remove laudit artifacts in " .. base .. "?", "&Yes\n&No", 2)
+    if choice ~= 1 then
+      return
+    end
+  end
+
+  M.stop()
+  for _, name in ipairs({ "model.json", "redactions.json", "tours", "index" }) do
+    local path = base .. "/" .. name
+    if vim.fn.isdirectory(path) == 1 then
+      vim.fn.delete(path, "rf")
+    elseif vim.fn.filereadable(path) == 1 then
+      vim.fn.delete(path)
+    end
+  end
+  notify("removed laudit artifacts in " .. base, vim.log.levels.INFO)
 end
 
 --- Move to the next stop and auto-follow its buffer/range.

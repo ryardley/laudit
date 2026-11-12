@@ -13,10 +13,11 @@ use tokio::sync::{mpsc, watch, Mutex};
 
 use super::protocol::{error_response, success_response, ErrorCode, RpcError, JSONRPC_VERSION};
 use crate::build;
+use crate::cache;
 use crate::comprehension;
 use crate::config::{Config, ConfigError};
 use crate::llm::{LlmClient, LlmError};
-use crate::model::{CodebaseModel, Skeleton, Stop, Tour};
+use crate::model::{CodebaseModel, Position, Skeleton, Stop, Tour};
 use crate::narration::{self, NarrationError, NarrationSink};
 use crate::plan::{self, PlanError, PlanOptions};
 use crate::status as tour_status;
@@ -154,9 +155,11 @@ impl MethodRegistry {
         registry.insert("ping", ping);
         registry.insert("status", status);
         registry.insert("build_tour", build_tour);
+        registry.insert("resume_tour", resume_tour);
         registry.insert("explain_stop", explain_stop);
         registry.insert("cancel", cancel);
         registry.insert("get_outline", get_outline);
+        registry.insert("set_position", set_position);
         registry
     }
 }
@@ -422,11 +425,23 @@ fn ping<'a>(_params: &'a Value, context: &'a ServerContext) -> HandlerFuture<'a>
 fn status<'a>(params: &'a Value, context: &'a ServerContext) -> HandlerFuture<'a> {
     Box::pin(async move {
         let tour_id = optional_string(params, "tour_id")?;
+        let repo = optional_string(params, "repo")?;
         let mut result = json!({ "engine": "ok" });
         let active = context.state().active.lock().await;
+        let mut reported = false;
         if let Some(tour) = active.as_ref() {
             if tour_id.as_deref().is_none_or(|id| id == tour.tour_id) {
                 if let Ok(report) = tour_status::status(&tour.repo, Some(&tour.tour_id)) {
+                    if let Ok(value) = serde_json::to_value(&report) {
+                        result["tour"] = value;
+                        reported = true;
+                    }
+                }
+            }
+        }
+        if !reported {
+            if let Some(repo) = repo {
+                if let Ok(report) = tour_status::status(&repo, tour_id.as_deref()) {
                     if let Ok(value) = serde_json::to_value(&report) {
                         result["tour"] = value;
                     }
@@ -511,6 +526,83 @@ fn build_tour<'a>(params: &'a Value, context: &'a ServerContext) -> HandlerFutur
         });
 
         Ok(json!({ "tour_id": tour_id }))
+    })
+}
+
+fn resume_tour<'a>(params: &'a Value, context: &'a ServerContext) -> HandlerFuture<'a> {
+    Box::pin(async move {
+        let repo = required_string(params, "repo")?;
+        let requested_id = optional_string(params, "tour_id")?;
+        let repo = PathBuf::from(repo);
+        if !repo.is_dir() {
+            return Err(RpcError::invalid_params(format!(
+                "repo is not a directory: {}",
+                repo.display()
+            )));
+        }
+
+        let tour_id = match requested_id {
+            Some(tour_id) => tour_id,
+            None => tour_status::latest_tour_id(&repo)
+                .map_err(|error| RpcError::internal(error.to_string()))?
+                .ok_or_else(|| RpcError::new(ErrorCode::TourNotFound, "no tour to resume"))?,
+        };
+
+        let mut tour = plan::load_tour(&repo, &tour_id).map_err(map_plan_error)?;
+        let invalidation = cache::invalidate_stale_stops(&repo, &mut tour);
+        if !invalidation.is_empty() {
+            plan::write_tour(&repo, &tour).map_err(map_plan_error)?;
+        }
+
+        let (cancel, _cancel_rx) = Cancellation::new();
+        {
+            let mut active = context.state().active.lock().await;
+            if let Some(previous) = active.as_ref() {
+                previous.cancel_all();
+            }
+            *active = Some(ActiveTour {
+                tour_id: tour_id.clone(),
+                repo: repo.clone(),
+                cancel,
+                stops: HashMap::new(),
+            });
+        }
+
+        Ok(json!({
+            "tour_id": tour_id,
+            "position": {
+                "chapter": tour.position.chapter,
+                "stop": tour.position.stop,
+            },
+        }))
+    })
+}
+
+fn set_position<'a>(params: &'a Value, context: &'a ServerContext) -> HandlerFuture<'a> {
+    Box::pin(async move {
+        let tour_id = required_string(params, "tour_id")?;
+        let chapter = required_u32(params, "chapter")?;
+        let stop = required_u32(params, "stop")?;
+
+        let repo = {
+            let active = context.state().active.lock().await;
+            let Some(tour) = active.as_ref() else {
+                return Err(tour_not_found(&tour_id));
+            };
+            if tour.tour_id != tour_id {
+                return Err(tour_not_found(&tour_id));
+            }
+            tour.repo.clone()
+        };
+
+        let position = Position { chapter, stop };
+        cache::set_position(&repo, &tour_id, position).map_err(map_plan_error)?;
+        Ok(json!({
+            "position": {
+                "chapter": chapter,
+                "stop": stop,
+            },
+        }))
     })
 }
 
@@ -833,9 +925,12 @@ fn outline_value(tour: &Tour) -> Value {
             "stops": chapter.stops.iter().map(|stop| json!({
                 "id": stop.id,
                 "title": stop.title,
+                "why_here": stop.why_here,
                 "file": stop.file,
                 "start_line": stop.start_line,
                 "end_line": stop.end_line,
+                "explanation": stop.explanation,
+                "status": stop.status,
             })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     })
@@ -871,6 +966,17 @@ fn optional_string(params: &Value, name: &str) -> Result<Option<String>, RpcErro
             "{name} must not be empty"
         ))),
         Some(_) => Err(RpcError::invalid_params(format!("{name} must be a string"))),
+    }
+}
+
+fn required_u32(params: &Value, name: &str) -> Result<u32, RpcError> {
+    match params.get(name) {
+        Some(Value::Number(value)) => value
+            .as_u64()
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| RpcError::invalid_params(format!("{name} must be a u32"))),
+        Some(_) => Err(RpcError::invalid_params(format!("{name} must be a number"))),
+        None => Err(RpcError::invalid_params(format!("{name} is required"))),
     }
 }
 
@@ -1035,5 +1141,90 @@ mod tests {
         assert_eq!(message["method"], "progress");
         assert_eq!(message["params"]["pct"], 50);
         assert!(message.get("id").is_none());
+    }
+
+    #[tokio::test]
+    async fn resume_tour_loads_the_latest_tour_and_set_position_persists() {
+        use crate::model::{
+            Position, Stop, StopStatus, Tour, TourChapter, TourSource, SCHEMA_VERSION,
+        };
+
+        let repo = std::env::temp_dir().join(format!(
+            "laudit-rpc-resume-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos())
+        ));
+        std::fs::create_dir_all(repo.join("src")).expect("create repo");
+        std::fs::write(repo.join("src/main.rs"), "fn main() {}\n").expect("write source");
+
+        let tour = Tour {
+            schema_version: SCHEMA_VERSION,
+            tool_version: "0.1.0".to_owned(),
+            tour_id: "tour-resume".to_owned(),
+            source: TourSource::codebase(),
+            model: "test-model".to_owned(),
+            prompt_version: "1".to_owned(),
+            redaction_profile: "default".to_owned(),
+            position: Position {
+                chapter: 0,
+                stop: 0,
+            },
+            chapters: vec![TourChapter {
+                id: "ch-1".to_owned(),
+                title: "On-ramp".to_owned(),
+                stops: vec![Stop {
+                    id: "stop-1".to_owned(),
+                    file: "src/main.rs".to_owned(),
+                    start_line: 1,
+                    end_line: 1,
+                    symbol_id: "sym-1".to_owned(),
+                    title: "Main".to_owned(),
+                    why_here: "entrypoint".to_owned(),
+                    explanation: String::new(),
+                    refs: Vec::new(),
+                    file_hash: String::new(),
+                    status: StopStatus::Pending,
+                }],
+            }],
+        };
+        plan::write_tour(&repo, &tour).expect("write tour");
+
+        let context = context();
+        let response = handle_line(
+            &format!(
+                r#"{{"jsonrpc":"2.0","id":1,"method":"resume_tour","params":{{"repo":{}}}}}"#,
+                serde_json::to_string(&repo.to_string_lossy()).expect("repo json")
+            ),
+            &MethodRegistry::with_defaults(),
+            &context,
+        )
+        .await
+        .expect("resume response");
+        assert_eq!(response["result"]["tour_id"], "tour-resume");
+        assert_eq!(response["result"]["position"]["chapter"], 0);
+        assert_eq!(response["result"]["position"]["stop"], 0);
+
+        let response = handle_line(
+            r#"{"jsonrpc":"2.0","id":2,"method":"set_position","params":{"tour_id":"tour-resume","chapter":0,"stop":0}}"#,
+            &MethodRegistry::with_defaults(),
+            &context,
+        )
+        .await
+        .expect("set_position response");
+        assert_eq!(response["result"]["position"]["chapter"], 0);
+        assert_eq!(response["result"]["position"]["stop"], 0);
+
+        let persisted = plan::load_tour(&repo, "tour-resume").expect("load tour");
+        assert_eq!(
+            persisted.position,
+            Position {
+                chapter: 0,
+                stop: 0
+            }
+        );
+
+        let _ = std::fs::remove_dir_all(&repo);
     }
 }

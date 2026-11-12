@@ -1,7 +1,7 @@
 -- laudit Neovim plugin: a thin UI over the Rust engine (D5, D6).
 --
--- This module owns setup{} and command dispatch. Tour logic lives in later
--- modules; for now only health is implemented.
+-- This module owns setup{} and command dispatch. Tour rendering lives in
+-- laudit.ui; health checks live in laudit.health.
 
 local M = {}
 
@@ -77,10 +77,6 @@ function M.health()
   return health.check()
 end
 
-local function not_implemented(name)
-  vim.notify("laudit: " .. name .. " is not implemented yet", vim.log.levels.WARN)
-end
-
 local function tour_options(args)
   local opts = {}
   local fargs = type(args) == "table" and args.fargs or {}
@@ -94,6 +90,8 @@ local function tour_options(args)
       index = index + 1
     elseif arg:sub(1, 7) == "--repo=" then
       opts.repo = arg:sub(8)
+    elseif arg == "--yes" or arg == "-y" then
+      opts.yes = true
     end
     index = index + 1
   end
@@ -107,14 +105,14 @@ local commands = {
   tour = function(args)
     ui.start(tour_options(args))
   end,
-  resume = function()
-    not_implemented("resume")
+  resume = function(args)
+    ui.resume(tour_options(args))
   end,
   stop = function()
     ui.stop()
   end,
   outline = function()
-    not_implemented("outline")
+    ui.outline()
   end,
   next = function()
     ui.next()
@@ -125,17 +123,17 @@ local commands = {
   ["return"] = function()
     ui.return_to_current()
   end,
-  model = function()
-    not_implemented("model")
+  model = function(args)
+    ui.model(tour_options(args))
   end,
-  explain = function()
-    not_implemented("explain")
+  explain = function(args)
+    ui.explain(args)
   end,
-  status = function()
-    not_implemented("status")
+  status = function(args)
+    ui.status(tour_options(args))
   end,
-  clear = function()
-    not_implemented("clear")
+  clear = function(args)
+    ui.clear(tour_options(args))
   end,
 }
 
