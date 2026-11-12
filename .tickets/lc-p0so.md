@@ -25,3 +25,9 @@ README quickstart works end to end; config and architecture docs match the imple
 ## References
 
 See `docs/README.md` and all documents under `docs/`.
+
+## Notes
+
+**2026-11-12T09:14:35Z**
+
+Document the Nix flake install path (nix run / nix profile install) in the README and docs/release.md; see lc-um4w.

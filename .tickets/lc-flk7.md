@@ -25,3 +25,9 @@ A tagged release produces the four Linux artifacts with checksums; build.lua bui
 ## References
 
 See `docs/release.md` and `docs/decisions.md` D8.
+
+## Notes
+
+**2026-11-12T09:14:35Z**
+
+Additional install path: Nix flake packaging is tracked separately in lc-um4w (packages/apps/devShell, nix run / nix profile install). Keep the GitHub Releases workflow and the flake consistent; see docs/release.md.

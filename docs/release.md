@@ -31,6 +31,23 @@ Order:
 `build.lua` runs `cargo build --release` for users who prefer to build locally.
 It must fail with a clear message if a Rust toolchain is missing.
 
+## Nix flake
+
+The project is also installable as a Nix flake (ticket `lc-um4w`), so users need
+no Rust toolchain:
+
+```sh
+nix run github:<owner>/laudit -- --version   # run without installing
+nix profile install github:<owner>/laudit    # install the binary
+```
+
+The flake exposes `packages.<system>.laudit` (and `default`), `apps.<system>.laudit`,
+a `devShells.<system>.default`, and optionally `packages.<system>.laudit-nvim`
+(the Lua plugin). It builds the workspace with `rustPlatform.buildRustPackage`
+and `cargoLock.lockFile = ./Cargo.lock`. `devenv.nix` remains the development
+environment; the flake is the packaging/installation path. `nix flake check`
+must pass.
+
 ## Versioning
 
 - `tool_version` is the crate version and is stamped into every artifact.
