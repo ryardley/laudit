@@ -1,6 +1,6 @@
 ---
 id: lc-flk7
-status: open
+status: closed
 deps: [lc-n5h7]
 links: []
 created: 2026-11-12T08:57:02Z
