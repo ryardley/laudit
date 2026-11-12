@@ -1,6 +1,6 @@
 ---
 id: lc-q94s
-status: open
+status: closed
 deps: [lc-rojs, lc-1i5z]
 links: []
 created: 2026-11-12T08:57:02Z
