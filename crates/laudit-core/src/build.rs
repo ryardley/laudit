@@ -155,6 +155,16 @@ pub fn write_skeleton(
     Ok(path)
 }
 
+/// Write a codebase model artifact under `.laudit/`.
+pub fn write_model(
+    repo_root: impl AsRef<Path>,
+    model: &CodebaseModel,
+) -> Result<PathBuf, BuildError> {
+    let path = repo_root.as_ref().join(MODEL_FILE);
+    write_json(&path, model)?;
+    Ok(path)
+}
+
 /// Run Stage 0 recon and write the offline artifacts under `.laudit/`.
 ///
 /// The build walks the repository, updates the content-hash index, rebuilds the

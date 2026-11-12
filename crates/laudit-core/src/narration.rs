@@ -55,7 +55,7 @@ pub const MAX_ATTEMPTS: usize = 2;
 /// Frontends implement this to render chunks as they arrive. The engine calls
 /// [`NarrationSink::on_chunk`] for each body delta and
 /// [`NarrationSink::on_stop`] once a stop has been persisted.
-pub trait NarrationSink {
+pub trait NarrationSink: Send {
     /// A chunk of the markdown body for `stop_id`.
     fn on_chunk(&mut self, stop_id: &str, delta: &str);
 

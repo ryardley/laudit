@@ -1,6 +1,6 @@
 ---
 id: lc-isfp
-status: open
+status: closed
 deps: [lc-1i5z, lc-lz7a]
 links: []
 created: 2026-11-12T08:57:02Z

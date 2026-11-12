@@ -73,6 +73,29 @@ pub fn plan(
     model: &CodebaseModel,
     options: &PlanOptions,
 ) -> Result<PlanReport, PlanError> {
+    plan_with_tour_id(
+        repo_root,
+        config,
+        skeleton,
+        model,
+        options,
+        tour_id(skeleton, options),
+    )
+}
+
+/// Plan a tour using an explicit `tour_id`.
+///
+/// This is the same as [`plan`] but lets a caller (for example the RPC server)
+/// choose the identifier before the deterministic plan is available. The
+/// identifier is used verbatim for the artifact path and the returned tour.
+pub fn plan_with_tour_id(
+    repo_root: impl AsRef<Path>,
+    config: &Config,
+    skeleton: &Skeleton,
+    model: &CodebaseModel,
+    options: &PlanOptions,
+    tour_id: impl Into<String>,
+) -> Result<PlanReport, PlanError> {
     let repo_root = repo_root.as_ref();
     let max_stops = config.budgets.max_stops_per_chapter;
     let mut builder = Builder::new(repo_root, skeleton, max_stops);
@@ -100,7 +123,7 @@ pub fn plan(
     let tour = Tour {
         schema_version: SCHEMA_VERSION,
         tool_version: crate::VERSION.to_owned(),
-        tour_id: tour_id(skeleton, options),
+        tour_id: tour_id.into(),
         source: TourSource::codebase(),
         model: model.model.clone(),
         prompt_version: narration_prompt_version(),
