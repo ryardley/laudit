@@ -425,7 +425,7 @@ fn status<'a>(params: &'a Value, context: &'a ServerContext) -> HandlerFuture<'a
         let mut result = json!({ "engine": "ok" });
         let active = context.state().active.lock().await;
         if let Some(tour) = active.as_ref() {
-            if tour_id.as_deref().map_or(true, |id| id == tour.tour_id) {
+            if tour_id.as_deref().is_none_or(|id| id == tour.tour_id) {
                 if let Ok(report) = tour_status::status(&tour.repo, Some(&tour.tour_id)) {
                     if let Ok(value) = serde_json::to_value(&report) {
                         result["tour"] = value;
@@ -605,7 +605,7 @@ fn cancel<'a>(params: &'a Value, context: &'a ServerContext) -> HandlerFuture<'a
             } else {
                 let stop_exists = plan::load_tour(&tour.repo, &tour.tour_id)
                     .ok()
-                    .map_or(true, |planned| find_stop(&planned, &stop_id).is_some());
+                    .is_none_or(|planned| find_stop(&planned, &stop_id).is_some());
                 if !stop_exists {
                     return Err(stop_not_found(&stop_id));
                 }

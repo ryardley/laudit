@@ -306,7 +306,7 @@ fn is_not_vendored(entry: &DirEntry) -> bool {
     entry
         .file_name()
         .to_str()
-        .map_or(true, |name| !VENDORED_DIRS.contains(&name))
+        .is_none_or(|name| !VENDORED_DIRS.contains(&name))
 }
 
 fn language_enabled(language: Language, configured: &[String]) -> bool {

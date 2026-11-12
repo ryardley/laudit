@@ -309,10 +309,10 @@ fn parse_blame(output: &str, now: i64) -> Option<BlameSummary> {
         if !entry.author.is_empty() {
             authors.insert(entry.author.as_str());
         }
-        if oldest.map_or(true, |oldest| entry.timestamp < oldest.timestamp) {
+        if oldest.is_none_or(|oldest| entry.timestamp < oldest.timestamp) {
             oldest = Some(entry);
         }
-        if newest.map_or(true, |newest| entry.timestamp > newest.timestamp) {
+        if newest.is_none_or(|newest| entry.timestamp > newest.timestamp) {
             newest = Some(entry);
         }
     }
