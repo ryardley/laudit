@@ -106,7 +106,7 @@ rpc.setup({
 ui.reset()
 ui.start({ repo = repo })
 wait_for(function()
-  return current_id() == "stop-1"
+  return current_id() == "stop-1" and #ui.state().stops >= 2
 end, 3000, "tour start before explain error")
 ui.next()
 wait_for(function()

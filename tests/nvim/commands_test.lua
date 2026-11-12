@@ -102,7 +102,7 @@ ui.reset()
 
 ui.start({ repo = repo, offline = false })
 wait_for(function()
-  return current_id() ~= nil
+  return current_id() ~= nil and #ui.state().stops >= 2
 end, 3000, "tour start")
 check(current_id() == "stop-1", "first stop is stop-1")
 
