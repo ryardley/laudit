@@ -18,4 +18,5 @@
   };
 in {
   languages.rust.enable = true;
+  packages = [tk];
 }
