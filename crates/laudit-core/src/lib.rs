@@ -3,6 +3,7 @@
 pub mod config;
 pub mod model;
 pub mod prompts;
+pub mod redact;
 pub mod rpc;
 
 /// The crate version, stamped into artifacts as `tool_version`.
