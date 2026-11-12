@@ -278,7 +278,7 @@ pub fn load_model(repo_root: &Path) -> Result<CodebaseModel, PlanError> {
     Ok(model)
 }
 
-fn narration_prompt_version() -> String {
+pub(crate) fn narration_prompt_version() -> String {
     match prompts::load(NARRATION) {
         Ok(prompt) => prompt.version.to_string(),
         Err(_) => prompts::version(NARRATION).map_or_else(|| "0".to_owned(), |v| v.to_string()),

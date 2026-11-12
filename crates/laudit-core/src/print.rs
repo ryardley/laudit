@@ -154,6 +154,54 @@ pub async fn prepare(
     })
 }
 
+/// Narrate a tour that was planned by a source adapter.
+///
+/// Unlike [`prepare`], the tour is supplied by the caller instead of being
+/// loaded from the most recent artifact. A missing model falls back to the
+/// offline placeholder so change tours work without a prior comprehension run.
+pub async fn prepare_tour(
+    repo_root: impl AsRef<Path>,
+    config: &Config,
+    offline: bool,
+    client: Option<&LlmClient>,
+    sink: &mut dyn NarrationSink,
+    mut tour: Tour,
+) -> Result<PreparedTour, PrintError> {
+    let repo_root = repo_root.as_ref();
+    let tour_path = plan::tour_path(repo_root, &tour.tour_id);
+
+    if offline {
+        return Ok(PreparedTour {
+            tour,
+            tour_path,
+            narrated: 0,
+            cached: 0,
+            warnings: Vec::new(),
+        });
+    }
+
+    let skeleton = explain::load_skeleton(repo_root, config)?;
+    let model = match load_model(repo_root, &skeleton, false) {
+        Ok(model) => model,
+        Err(PrintError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            build::offline_model(&skeleton)
+        }
+        Err(error) => return Err(error),
+    };
+    let client = client.ok_or(PrintError::MissingClient)?;
+    let report = narration::narrate(
+        repo_root, config, &skeleton, &model, &mut tour, client, sink,
+    )
+    .await?;
+    Ok(PreparedTour {
+        tour: report.tour,
+        tour_path: report.tour_path,
+        narrated: report.narrated,
+        cached: report.cached,
+        warnings: report.warnings,
+    })
+}
+
 fn load_model(
     repo_root: &Path,
     skeleton: &Skeleton,

@@ -234,6 +234,22 @@ impl TourSource {
             kind: "codebase".to_owned(),
         }
     }
+
+    /// A tour of uncommitted changes.
+    #[must_use]
+    pub fn uncommitted() -> Self {
+        Self {
+            kind: "uncommitted".to_owned(),
+        }
+    }
+
+    /// A tour of a commit range.
+    #[must_use]
+    pub fn range() -> Self {
+        Self {
+            kind: "range".to_owned(),
+        }
+    }
 }
 
 /// Current position within a tour.

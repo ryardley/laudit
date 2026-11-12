@@ -8,7 +8,7 @@ All frontends are thin layers over `laudit-core`. The engine is CLI-first (D23).
 |---|---|
 | `laudit build [--offline] [--check] [--quiet] [--include-tests] [--skip-config]` | Run recon (+ comprehension/plan unless `--offline`). `--check` exits non-zero if artifacts are stale. |
 | `laudit serve` | Start the JSON-RPC 2.0 stdio server (see `docs/protocol.md`). |
-| `laudit tour [--print]` | Run the interactive TUI, or print the tour with `--print`. |
+| `laudit tour [--print] [--uncommitted \| --range <base..head> [--per-commit]]` | Run the interactive TUI, or print the tour with `--print`. Source flags tour uncommitted changes or a commit range. |
 | `laudit explain <symbol>` | Print a grounded explanation for one symbol. |
 | `laudit export --md [--out <path>]` | Render a tour to markdown. |
 | `laudit export --html [--out <dir\|file>]` | Render a tour to a self-contained HTML document. |
@@ -19,9 +19,8 @@ All frontends are thin layers over `laudit-core`. The engine is CLI-first (D23).
 Global flags: `--repo <path>`, `--offline`, `--json`, `--color`, `--version`,
 `--help`.
 
-Reserved but not yet implemented: `laudit ask`, `laudit outline`, `laudit clear`,
-and the source-adapter flags `tour --uncommitted`, `tour --range <base..head>`,
-and `tour --per-commit`. They parse their documented flags and exit non-zero with
+Reserved but not yet implemented: `laudit ask`, `laudit outline`, and
+`laudit clear`. They parse their documented flags and exit non-zero with
 "not implemented yet".
 
 ## Terminal TUI (`laudit tour`)

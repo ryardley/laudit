@@ -1,6 +1,6 @@
 ---
 id: lc-q4hn
-status: open
+status: closed
 deps: [lc-berl, lc-1yrq]
 links: []
 created: 2026-11-12T09:02:36Z

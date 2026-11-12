@@ -15,6 +15,7 @@ pub mod prompts;
 pub mod recon;
 pub mod redact;
 pub mod rpc;
+pub mod source;
 pub mod status;
 
 /// The crate version, stamped into artifacts as `tool_version`.

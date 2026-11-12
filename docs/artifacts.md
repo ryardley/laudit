@@ -117,7 +117,7 @@ when git data is available.
   "schema_version": 1,
   "tool_version": "0.1.0",
   "tour_id": "tour-…",
-  "source": { "kind": "codebase" },   // later: "uncommitted" | "range"
+  "source": { "kind": "codebase" },   // "codebase" | "uncommitted" | "range"
   "model": "gpt-4o-mini",
   "prompt_version": "1",
   "redaction_profile": "default",

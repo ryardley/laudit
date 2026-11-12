@@ -361,12 +361,33 @@ fn stale_reason(reason: laudit_core::build::StaleReason) -> &'static str {
 }
 
 fn run_tour(repo: Option<PathBuf>, offline: bool, color: ColorChoice, args: TourArgs) -> ExitCode {
-    if args.uncommitted || args.range.is_some() || args.per_commit {
-        eprintln!("laudit tour: source adapters are not implemented yet");
+    let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
+
+    let source = if args.uncommitted {
+        if args.range.is_some() || args.per_commit {
+            eprintln!("laudit tour: --uncommitted cannot be combined with --range or --per-commit");
+            return ExitCode::FAILURE;
+        }
+        Some(laudit_core::source::SourceSpec::Uncommitted)
+    } else if let Some(range) = &args.range {
+        match laudit_core::source::SourceSpec::parse_range(range, args.per_commit) {
+            Ok(spec) => Some(spec),
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else if args.per_commit {
+        eprintln!("laudit tour: --per-commit requires --range <base..head>");
         return ExitCode::FAILURE;
+    } else {
+        None
+    };
+
+    if let Some(spec) = source {
+        return run_source_tour(repo_root, offline, color, args.print, spec);
     }
 
-    let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
     if !args.print {
         return match laudit_tui::run(repo_root, offline) {
             Ok(()) => ExitCode::SUCCESS,
@@ -444,6 +465,144 @@ fn run_tour(repo: Option<PathBuf>, offline: bool, color: ColorChoice, args: Tour
         false,
         Some(&client),
         &mut sink,
+    )) {
+        Ok(prepared) => {
+            for warning in &prepared.warnings {
+                eprintln!("laudit: warning: {warning}");
+            }
+            print!(
+                "{}",
+                laudit_core::print::render(
+                    &prepared.tour,
+                    laudit_core::print::PrintOptions {
+                        color: color_enabled,
+                        offline: false,
+                    },
+                )
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_source_tour(
+    repo_root: PathBuf,
+    offline: bool,
+    color: ColorChoice,
+    print: bool,
+    spec: laudit_core::source::SourceSpec,
+) -> ExitCode {
+    let config = if offline {
+        match laudit_core::config::Config::load_offline(&repo_root) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        match laudit_core::config::Config::load(&repo_root) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    };
+
+    let recon = match laudit_core::build::recon(&repo_root, &config) {
+        Ok(recon) => recon,
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = laudit_core::build::write_skeleton(&repo_root, &recon.skeleton) {
+        eprintln!("laudit tour: {error}");
+        return ExitCode::FAILURE;
+    }
+
+    let model = match laudit_core::plan::load_model(&repo_root) {
+        Ok(model) => model,
+        Err(laudit_core::plan::PlanError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            laudit_core::build::offline_model(&recon.skeleton)
+        }
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let report =
+        match laudit_core::source::plan(&repo_root, &config, &recon.skeleton, &model, &spec) {
+            Ok(report) => report,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+    for warning in &report.warnings {
+        eprintln!("laudit: warning: {warning}");
+    }
+
+    if !print {
+        return match laudit_tui::run(repo_root, offline) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
+    let color_enabled = color_enabled(color);
+    if offline {
+        print!(
+            "{}",
+            laudit_core::print::render(
+                &report.tour,
+                laudit_core::print::PrintOptions {
+                    color: color_enabled,
+                    offline: true,
+                },
+            )
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    report_prompt_install();
+    let client = match laudit_core::llm::LlmClient::from_config(&config) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let mut sink = laudit_core::narration::NoopSink;
+    match runtime.block_on(laudit_core::print::prepare_tour(
+        &repo_root,
+        &config,
+        false,
+        Some(&client),
+        &mut sink,
+        report.tour,
     )) {
         Ok(prepared) => {
             for warning in &prepared.warnings {

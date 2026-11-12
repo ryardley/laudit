@@ -872,14 +872,6 @@ fn tour_print_color_always_emits_ansi_and_never_does_not() {
 }
 
 #[test]
-fn tour_rejects_unimplemented_source_adapters() {
-    let output = laudit(&["tour", "--print", "--uncommitted"]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("not implemented yet"), "got: {stderr}");
-}
-
-#[test]
 fn interactive_tour_requires_a_terminal() {
     let temp = TempDir::new();
     let config_dir = temp.path().join("config");

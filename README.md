@@ -122,7 +122,7 @@ model = "llama3.1"
 | Command | Purpose |
 |---|---|
 | `laudit build [--offline] [--check] [--quiet] [--include-tests] [--skip-config]` | Run recon (+ comprehension/plan unless `--offline`). `--check` exits non-zero if artifacts are stale. |
-| `laudit tour [--print]` | Run the interactive TUI, or print the tour with `--print`. |
+| `laudit tour [--print] [--uncommitted \| --range <base..head> [--per-commit]]` | Run the interactive TUI, or print the tour with `--print`. Source flags tour uncommitted changes or a commit range. |
 | `laudit explain <symbol>` | Print a grounded explanation for one symbol. |
 | `laudit export --md [--out <path>]` | Render the tour to markdown. |
 | `laudit export --html [--out <dir\|file>]` | Render the tour to a self-contained HTML document. |
@@ -135,8 +135,7 @@ Global flags: `--repo <path>`, `--offline`, `--json`, `--color auto|always|never
 `--version`, `--help`.
 
 `laudit ask`, `laudit outline`, and `laudit clear` are reserved commands that
-currently exit with "not implemented yet". Source adapters (`tour --uncommitted`,
-`tour --range`) are also not implemented in v1.
+currently exit with "not implemented yet".
 
 ## Neovim keymaps
 

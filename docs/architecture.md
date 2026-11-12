@@ -122,10 +122,10 @@ skip + warn and mark the stop. Persist prose into the tour artifact.
 | `print` | Pipe-friendly tour rendering. |
 | `export` | Markdown and HTML rendering. |
 | `status` | Read-only model/tour presence and stop counts. |
+| `source` | Change-based source adapters (uncommitted, commit range). |
 | `rpc` | JSON-RPC 2.0 stdio server. |
 
-Source adapters (uncommitted/rev-range) and grounded Q&A (`ask`) are planned
-modules; they are not part of the current engine.
+Grounded Q&A (`ask`) is a planned module; it is not part of the current engine.
 
 ## Artifacts
 
@@ -188,7 +188,6 @@ These are non-negotiable and apply to every ticket:
 - No tests chapter by default (opt-in).
 - No non-Linux release binaries.
 - No provider profiles, no multi-provider routing.
-- No uncommitted/rev-range tours until the source-adapter ticket lands.
 
 ## References
 
