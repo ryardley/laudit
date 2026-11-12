@@ -293,12 +293,18 @@ fn run_tour(repo: Option<PathBuf>, offline: bool, color: ColorChoice, args: Tour
         eprintln!("laudit tour: source adapters are not implemented yet");
         return ExitCode::FAILURE;
     }
-    if !args.print {
-        eprintln!("laudit tour: interactive tours are not implemented yet; use --print");
-        return ExitCode::FAILURE;
-    }
 
     let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
+    if !args.print {
+        return match laudit_tui::run(repo_root, offline) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     let color_enabled = color_enabled(color);
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
