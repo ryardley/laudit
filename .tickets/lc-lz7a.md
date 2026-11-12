@@ -1,6 +1,6 @@
 ---
 id: lc-lz7a
-status: open
+status: closed
 deps: [lc-1yrq, lc-s7w8, lc-k97t]
 links: []
 created: 2026-11-12T08:57:02Z
