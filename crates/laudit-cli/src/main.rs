@@ -169,21 +169,76 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
     if args.check {
         return not_implemented("build --check", &args);
     }
-    if !offline {
-        return not_implemented("build", &args);
-    }
 
     let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
-    let config = match laudit_core::config::Config::load_offline(&repo_root) {
+
+    if offline {
+        let config = match laudit_core::config::Config::load_offline(&repo_root) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("laudit build: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+
+        return match laudit_core::build::build_offline(&repo_root, &config) {
+            Ok(report) => {
+                if json {
+                    match serde_json::to_string_pretty(&report) {
+                        Ok(rendered) => println!("{rendered}"),
+                        Err(error) => {
+                            eprintln!("laudit build: {error}");
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                } else if !args.quiet {
+                    print_build_summary(&report);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("laudit build: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
+    report_prompt_install();
+    let config = match laudit_core::config::Config::load(&repo_root) {
         Ok(config) => config,
         Err(error) => {
             eprintln!("laudit build: {error}");
             return ExitCode::FAILURE;
         }
     };
+    let client = match laudit_core::llm::LlmClient::from_config(&config) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("laudit build: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("laudit build: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
 
-    match laudit_core::build::build_offline(&repo_root, &config) {
+    match runtime.block_on(laudit_core::comprehension::build(
+        &repo_root, &config, &client,
+    )) {
         Ok(report) => {
+            for id in &report.dropped_ids {
+                eprintln!("laudit: warning: dropped unknown symbol id {id}");
+            }
+            for file in &report.dropped_files {
+                eprintln!("laudit: warning: dropped unknown file {file}");
+            }
             if json {
                 match serde_json::to_string_pretty(&report) {
                     Ok(rendered) => println!("{rendered}"),
@@ -193,7 +248,7 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
                     }
                 }
             } else if !args.quiet {
-                print_build_summary(&report);
+                print_comprehension_summary(&report);
             }
             ExitCode::SUCCESS
         }
@@ -201,6 +256,22 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
             eprintln!("laudit build: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn print_comprehension_summary(report: &laudit_core::comprehension::ComprehensionReport) {
+    println!("laudit build");
+    println!("  model:        {}", report.model_path.display());
+    println!("  subsystems:   {}", report.model.subsystems.len());
+    println!("  chapters:     {}", report.model.chapters.len());
+    println!("  flows:        {}", report.model.flows.len());
+    println!("  glossary:     {}", report.model.glossary.len());
+    if report.cached {
+        println!("  cache:        hit");
+    } else if report.hierarchical {
+        println!("  cache:        miss (hierarchical)");
+    } else {
+        println!("  cache:        miss");
     }
 }
 

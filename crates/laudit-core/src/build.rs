@@ -18,7 +18,7 @@ use crate::recon::index::index_path;
 use crate::recon::walk::walk;
 use crate::recon::{
     build_index, content_hash, detect_entrypoints, head as git_head, mine_files, Entrypoint, Graph,
-    Index, Provenance, WalkError,
+    Index, IndexBuild, Provenance, WalkError,
 };
 
 /// Repository-relative path of the structural skeleton artifact.
@@ -104,16 +104,22 @@ impl From<serde_json::Error> for BuildError {
     }
 }
 
-/// Run Stage 0 recon and write the offline artifacts under `.laudit/`.
+/// The result of running Stage 0 recon without writing artifacts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReconReport {
+    /// The deterministic structural skeleton.
+    pub skeleton: Skeleton,
+    /// The incremental index and graph built during recon.
+    pub index_build: IndexBuild,
+}
+
+/// Run Stage 0 recon and return the skeleton and index without writing the
+/// placeholder model.
 ///
-/// The build walks the repository, updates the content-hash index, rebuilds the
-/// graph, detects entrypoints, mines provenance, and writes a structural
-/// skeleton plus a placeholder codebase model with empty prose fields. No LLM
-/// is called.
-pub fn build_offline(
-    repo_root: impl AsRef<Path>,
-    config: &Config,
-) -> Result<BuildReport, BuildError> {
+/// This is the shared entry point for the offline build and for Stage 1
+/// comprehension, which must be able to inspect an existing `model.json` before
+/// deciding whether its cache is still valid.
+pub fn recon(repo_root: impl AsRef<Path>, config: &Config) -> Result<ReconReport, BuildError> {
     let repo_root = repo_root.as_ref();
     let files = walk(repo_root, config)?;
     let index_build = build_index(repo_root, &files)?;
@@ -128,15 +134,50 @@ pub fn build_offline(
         &index_build.graph,
         entrypoints,
         provenance,
-        repo_id.clone(),
-        head.clone(),
-        dirty_hash.clone(),
+        repo_id,
+        head,
+        dirty_hash,
     );
-    let model = placeholder_model(repo_id, head, dirty_hash);
 
-    let skeleton_path = repo_root.join(SKELETON_FILE);
+    Ok(ReconReport {
+        skeleton,
+        index_build,
+    })
+}
+
+/// Write the structural skeleton artifact under `.laudit/`.
+pub fn write_skeleton(
+    repo_root: impl AsRef<Path>,
+    skeleton: &Skeleton,
+) -> Result<PathBuf, BuildError> {
+    let path = repo_root.as_ref().join(SKELETON_FILE);
+    write_json(&path, skeleton)?;
+    Ok(path)
+}
+
+/// Run Stage 0 recon and write the offline artifacts under `.laudit/`.
+///
+/// The build walks the repository, updates the content-hash index, rebuilds the
+/// graph, detects entrypoints, mines provenance, and writes a structural
+/// skeleton plus a placeholder codebase model with empty prose fields. No LLM
+/// is called.
+pub fn build_offline(
+    repo_root: impl AsRef<Path>,
+    config: &Config,
+) -> Result<BuildReport, BuildError> {
+    let repo_root = repo_root.as_ref();
+    let ReconReport {
+        skeleton,
+        index_build,
+    } = recon(repo_root, config)?;
+    let model = placeholder_model(
+        skeleton.repo_id.clone(),
+        skeleton.head.clone(),
+        skeleton.dirty_hash.clone(),
+    );
+
+    let skeleton_path = write_skeleton(repo_root, &skeleton)?;
     let model_path = repo_root.join(MODEL_FILE);
-    write_json(&skeleton_path, &skeleton)?;
     write_json(&model_path, &model)?;
 
     Ok(BuildReport {

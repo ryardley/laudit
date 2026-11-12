@@ -730,6 +730,8 @@ dependencies = [
  "clap",
  "laudit-core",
  "serde_json",
+ "tokio",
+ "wiremock",
 ]
 
 [[package]]

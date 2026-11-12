@@ -1,6 +1,6 @@
 ---
 id: lc-g6vg
-status: open
+status: closed
 deps: [lc-57oh, lc-s7w8, lc-ftdp, lc-k97t]
 links: []
 created: 2026-11-12T08:57:02Z

@@ -4,6 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use serde_json::json;
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
 fn laudit(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_laudit"))
         .args(args)
@@ -208,4 +212,65 @@ fn offline_build_writes_index_and_skeleton_artifacts() {
         first_skeleton, second_skeleton,
         "skeleton is not deterministic"
     );
+}
+
+#[tokio::test]
+async fn non_offline_build_writes_model_with_mock_llm() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let server = MockServer::start().await;
+    let content = json!({
+        "subsystems": [],
+        "chapters": [],
+        "flows": [],
+        "glossary": [{ "term": "Term", "definition": "Definition." }]
+    })
+    .to_string();
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "choices": [{
+                "index": 0,
+                "message": { "role": "assistant", "content": content },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2
+            }
+        })))
+        .mount(&server)
+        .await;
+
+    let config_path = temp.path().join(".laudit/config.toml");
+    fs::create_dir_all(config_path.parent().expect("config parent")).expect("create .laudit");
+    fs::write(
+        &config_path,
+        format!(
+            "[provider]\nbase_url = \"{}\"\nmodel = \"test-model\"\n",
+            server.uri()
+        ),
+    )
+    .expect("write config");
+
+    let output = laudit_with_config_dir(&config_dir, &["build", "--repo", &repo]);
+    assert!(
+        output.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let model_path = temp.path().join(".laudit/model.json");
+    let model: serde_json::Value =
+        serde_json::from_slice(&fs::read(&model_path).expect("read model")).expect("parse model");
+    assert_eq!(model["schema_version"], 1);
+    assert_eq!(model["model"], "test-model");
+    assert_eq!(model["glossary"][0]["term"], "Term");
+    assert!(model["subsystems"].is_array());
 }
