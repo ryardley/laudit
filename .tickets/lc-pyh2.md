@@ -1,6 +1,6 @@
 ---
 id: lc-pyh2
-status: open
+status: closed
 deps: [lc-7xd3]
 links: []
 created: 2026-11-12T08:57:02Z
