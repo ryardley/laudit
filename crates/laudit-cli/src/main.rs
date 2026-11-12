@@ -162,7 +162,7 @@ fn main() -> ExitCode {
         Some(Command::Build(args)) => run_build(cli.repo, cli.offline, cli.json, args),
         Some(Command::Tour(args)) => run_tour(cli.repo, cli.offline, cli.color, args),
         Some(Command::Explain { symbol }) => run_explain(cli.repo, cli.offline, cli.color, &symbol),
-        Some(Command::Export(args)) => not_implemented("export", &args),
+        Some(Command::Export(args)) => run_export(cli.repo, args),
         Some(Command::Ask { question }) => not_implemented("ask", &question),
         Some(Command::Mcp) => not_implemented("mcp", &()),
         Some(Command::Outline) => not_implemented("outline", &()),
@@ -558,6 +558,31 @@ fn print_explain_offline(
     } else {
         println!("{title}");
         println!("{location}");
+    }
+}
+
+fn run_export(repo: Option<PathBuf>, args: ExportArgs) -> ExitCode {
+    if args.html {
+        return not_implemented("export --html", &args);
+    }
+
+    let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
+    let out = args
+        .out
+        .as_deref()
+        .filter(|path| *path != std::path::Path::new("-"));
+
+    match laudit_core::export::export_markdown(&repo_root, None, out) {
+        Ok(report) => {
+            if out.is_none() {
+                print!("{}", report.markdown);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("laudit export: {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 

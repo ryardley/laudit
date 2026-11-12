@@ -1,0 +1,38 @@
+---
+source: crates/laudit-core/tests/export.rs
+expression: markdown
+---
+# rust-app
+
+## On-ramp
+
+### main — src/main.rs:1-4
+
+```rust
+mod hub;
+mod util;
+
+fn main() {
+```
+
+**Why here:** Entrypoint: the tour starts here.
+
+The program starts here.
+
+Refs: [hub (src/hub.rs:3)](src/hub.rs:3), [helper (src/util.rs:1)](src/util.rs:1)
+
+## Core
+
+### helper — src/util.rs:1-3
+
+```rust
+pub fn helper() -> u32 {
+    2
+}
+```
+
+**Why here:** Part of the Core subsystem.
+
+The helper returns a constant.
+
+Refs: [main (src/main.rs:4)](src/main.rs:4)

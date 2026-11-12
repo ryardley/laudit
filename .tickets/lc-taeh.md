@@ -1,6 +1,6 @@
 ---
 id: lc-taeh
-status: open
+status: closed
 deps: [lc-1yrq, lc-lz7a]
 links: []
 created: 2026-11-12T09:02:36Z

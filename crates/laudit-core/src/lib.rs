@@ -5,6 +5,7 @@ pub mod cache;
 pub mod comprehension;
 pub mod config;
 pub mod explain;
+pub mod export;
 pub mod llm;
 pub mod model;
 pub mod narration;
