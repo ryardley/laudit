@@ -14,6 +14,7 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+clap = { version = "~4.5.61", features = ["derive"] }
 laudit-core = { path = "../laudit-core" }
 
 [dev-dependencies]
