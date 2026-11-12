@@ -4,12 +4,14 @@
 //! (D4). The first step is [`walk`], which enumerates candidate source files;
 //! [`parse`] then extracts definitions and references from each file; [`graph`]
 //! turns those tags into a ranked file/symbol graph with communities;
-//! [`entrypoints`] identifies where a tour should start; and [`git`] mines
-//! provenance signals that explain why code exists.
+//! [`entrypoints`] identifies where a tour should start; [`git`] mines
+//! provenance signals that explain why code exists; and [`index`] persists the
+//! parse results so re-runs only re-parse changed files.
 
 pub mod entrypoints;
 pub mod git;
 pub mod graph;
+pub mod index;
 pub mod parse;
 pub mod walk;
 
@@ -19,5 +21,9 @@ pub use git::{
     CommitSummary, LineRange, Provenance,
 };
 pub use graph::{Community, FileEdge, FileNode, Graph, SymbolEdge, SymbolNode};
+pub use index::{
+    build as build_index, content_hash, ensure_gitignore, load as load_index, save as save_index,
+    BuildStats, FileEntry, Index, IndexBuild,
+};
 pub use parse::{parse_file, parse_files, parse_source, Tag, TagKind};
 pub use walk::{Language, SourceFile, WalkError, WalkOptions};

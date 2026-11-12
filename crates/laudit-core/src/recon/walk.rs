@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use ignore::overrides::{Override, OverrideBuilder};
 use ignore::{DirEntry, WalkBuilder};
+use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 
@@ -25,7 +26,8 @@ pub const VENDORED_DIRS: &[&str] = &["node_modules", "target", "vendor", "dist"]
 const BINARY_SNIFF_LEN: usize = 8 * 1024;
 
 /// A language understood by the bundled tree-sitter grammars (D7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Language {
     /// Rust.
     Rust,
