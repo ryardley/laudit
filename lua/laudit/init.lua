@@ -7,6 +7,7 @@ local M = {}
 
 local config = require("laudit.config")
 local health = require("laudit.health")
+local ui = require("laudit.ui")
 
 local keymaps = {
   { "<leader>lt", "tour", "laudit: start tour" },
@@ -80,30 +81,49 @@ local function not_implemented(name)
   vim.notify("laudit: " .. name .. " is not implemented yet", vim.log.levels.WARN)
 end
 
+local function tour_options(args)
+  local opts = {}
+  local fargs = type(args) == "table" and args.fargs or {}
+  local index = 2
+  while index <= #fargs do
+    local arg = fargs[index]
+    if arg == "--offline" then
+      opts.offline = true
+    elseif arg == "--repo" and fargs[index + 1] then
+      opts.repo = fargs[index + 1]
+      index = index + 1
+    elseif arg:sub(1, 7) == "--repo=" then
+      opts.repo = arg:sub(8)
+    end
+    index = index + 1
+  end
+  return opts
+end
+
 local commands = {
   health = function()
     health.show()
   end,
-  tour = function()
-    not_implemented("tour")
+  tour = function(args)
+    ui.start(tour_options(args))
   end,
   resume = function()
     not_implemented("resume")
   end,
   stop = function()
-    not_implemented("stop")
+    ui.stop()
   end,
   outline = function()
     not_implemented("outline")
   end,
   next = function()
-    not_implemented("next")
+    ui.next()
   end,
   prev = function()
-    not_implemented("prev")
+    ui.prev()
   end,
   ["return"] = function()
-    not_implemented("return")
+    ui.return_to_current()
   end,
   model = function()
     not_implemented("model")
