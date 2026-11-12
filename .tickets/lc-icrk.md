@@ -1,6 +1,6 @@
 ---
 id: lc-icrk
-status: open
+status: closed
 deps: [lc-57oh]
 links: []
 created: 2026-11-12T09:02:36Z

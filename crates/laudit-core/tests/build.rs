@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use laudit_core::build::{build_offline, MODEL_FILE, SKELETON_FILE};
+use laudit_core::build::{build_offline, check_offline, StaleReason, MODEL_FILE, SKELETON_FILE};
 use laudit_core::config::Config;
 use laudit_core::model::{CodebaseModel, Skeleton};
 use laudit_core::recon::index::{index_path, GITIGNORE_FILE};
@@ -109,4 +109,80 @@ fn offline_build_writes_valid_deterministic_artifacts() {
         skeleton_bytes, second_skeleton,
         "skeleton is not deterministic"
     );
+}
+
+#[test]
+fn check_reports_fresh_after_an_offline_build() {
+    let temp = fixture();
+    let config = Config::load_from_offline(None, None).expect("offline config");
+    build_offline(temp.path(), &config).expect("build");
+
+    let report = check_offline(temp.path(), &config).expect("check");
+
+    assert!(report.fresh);
+    assert!(report.stale.is_empty());
+}
+
+#[test]
+fn check_reports_missing_artifacts_without_writing_them() {
+    let temp = fixture();
+    let config = Config::load_from_offline(None, None).expect("offline config");
+
+    let report = check_offline(temp.path(), &config).expect("check");
+
+    assert!(!report.fresh);
+    assert_eq!(report.stale.len(), 2);
+    assert!(report
+        .stale
+        .iter()
+        .all(|artifact| artifact.reason == StaleReason::Missing));
+    assert!(!temp.path().join(SKELETON_FILE).exists());
+    assert!(!temp.path().join(MODEL_FILE).exists());
+    assert!(!temp.path().join(".laudit/index").exists());
+    assert!(!temp.path().join(".laudit/.gitignore").exists());
+}
+
+#[test]
+fn check_reports_changed_artifacts_without_rewriting_them() {
+    let temp = fixture();
+    let config = Config::load_from_offline(None, None).expect("offline config");
+    build_offline(temp.path(), &config).expect("build");
+
+    let skeleton_path = temp.path().join(SKELETON_FILE);
+    let mut skeleton = fs::read(&skeleton_path).expect("read skeleton");
+    skeleton.push(b'\n');
+    fs::write(&skeleton_path, &skeleton).expect("tamper skeleton");
+
+    let report = check_offline(temp.path(), &config).expect("check");
+
+    assert!(!report.fresh);
+    assert_eq!(report.stale.len(), 1);
+    assert_eq!(report.stale[0].path, skeleton_path);
+    assert_eq!(report.stale[0].reason, StaleReason::Changed);
+    assert_eq!(
+        fs::read(&skeleton_path).expect("read skeleton"),
+        skeleton,
+        "check must not rewrite artifacts"
+    );
+}
+
+#[test]
+fn check_detects_source_changes() {
+    let temp = fixture();
+    let config = Config::load_from_offline(None, None).expect("offline config");
+    build_offline(temp.path(), &config).expect("build");
+
+    fs::write(
+        temp.path().join("src/hub.rs"),
+        "pub fn hub() {}\npub fn extra() {}\n",
+    )
+    .expect("edit source");
+
+    let report = check_offline(temp.path(), &config).expect("check");
+
+    assert!(!report.fresh);
+    assert!(report
+        .stale
+        .iter()
+        .any(|artifact| artifact.path == temp.path().join(SKELETON_FILE)));
 }

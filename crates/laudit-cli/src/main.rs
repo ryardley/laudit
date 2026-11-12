@@ -1,5 +1,5 @@
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
@@ -186,11 +186,11 @@ fn not_implemented<T: std::fmt::Debug>(command: &str, _args: &T) -> ExitCode {
 }
 
 fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) -> ExitCode {
-    if args.check {
-        return not_implemented("build --check", &args);
-    }
-
     let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
+
+    if args.check {
+        return run_build_check(&repo_root, json, args.quiet);
+    }
 
     if offline {
         let config = match laudit_core::config::Config::load_offline(&repo_root) {
@@ -294,6 +294,69 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
             eprintln!("laudit build: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn run_build_check(repo_root: &Path, json: bool, quiet: bool) -> ExitCode {
+    let config = match laudit_core::config::Config::load_offline(repo_root) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("laudit build: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match laudit_core::build::check_offline(repo_root, &config) {
+        Ok(report) => {
+            if json {
+                match serde_json::to_string_pretty(&report) {
+                    Ok(rendered) => println!("{rendered}"),
+                    Err(error) => {
+                        eprintln!("laudit build: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            } else if !quiet {
+                if report.fresh {
+                    println!("laudit build (offline): artifacts are fresh");
+                } else {
+                    println!("laudit build (offline): artifacts are stale");
+                    for artifact in &report.stale {
+                        println!(
+                            "  {}: {}",
+                            artifact.path.display(),
+                            stale_reason(artifact.reason)
+                        );
+                    }
+                }
+            }
+
+            if report.fresh {
+                ExitCode::SUCCESS
+            } else {
+                if quiet {
+                    for artifact in &report.stale {
+                        eprintln!(
+                            "laudit build: stale artifact {} ({})",
+                            artifact.path.display(),
+                            stale_reason(artifact.reason)
+                        );
+                    }
+                }
+                ExitCode::FAILURE
+            }
+        }
+        Err(error) => {
+            eprintln!("laudit build: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn stale_reason(reason: laudit_core::build::StaleReason) -> &'static str {
+    match reason {
+        laudit_core::build::StaleReason::Missing => "missing",
+        laudit_core::build::StaleReason::Changed => "changed",
     }
 }
 

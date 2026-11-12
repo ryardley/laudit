@@ -128,6 +128,24 @@ pub struct IndexBuild {
 ///
 /// Unreadable files are skipped so one bad file cannot abort recon.
 pub fn build(repo_root: impl AsRef<Path>, files: &[SourceFile]) -> io::Result<IndexBuild> {
+    build_with(repo_root, files, true)
+}
+
+/// Build the incremental index for `files` without writing anything to disk.
+///
+/// This is the read-only counterpart to [`build`]. It reuses the persisted
+/// index when present but never creates or updates `.laudit/index/` or
+/// `.laudit/.gitignore`, so callers such as `laudit build --check` can verify
+/// artifacts without mutating the working tree.
+pub fn build_readonly(repo_root: impl AsRef<Path>, files: &[SourceFile]) -> io::Result<IndexBuild> {
+    build_with(repo_root, files, false)
+}
+
+fn build_with(
+    repo_root: impl AsRef<Path>,
+    files: &[SourceFile],
+    persist: bool,
+) -> io::Result<IndexBuild> {
     let repo_root = repo_root.as_ref();
     let previous = load(repo_root)?.unwrap_or_default();
     let mut entries: BTreeMap<PathBuf, FileEntry> = BTreeMap::new();
@@ -187,8 +205,10 @@ pub fn build(repo_root: impl AsRef<Path>, files: &[SourceFile]) -> io::Result<In
         symbol_edges: graph.symbol_edges.clone(),
     };
 
-    ensure_gitignore(repo_root)?;
-    save(repo_root, &index)?;
+    if persist {
+        ensure_gitignore(repo_root)?;
+        save(repo_root, &index)?;
+    }
 
     Ok(IndexBuild {
         index,

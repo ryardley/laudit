@@ -102,20 +102,7 @@ fn unknown_flags_are_rejected() {
 
 #[test]
 fn stubs_parse_documented_flags_and_exit_non_zero() {
-    let cases: &[&[&str]] = &[
-        &[
-            "build",
-            "--offline",
-            "--check",
-            "--quiet",
-            "--repo",
-            ".",
-            "--json",
-        ],
-        &["ask", "what does this do?"],
-        &["outline"],
-        &["clear"],
-    ];
+    let cases: &[&[&str]] = &[&["ask", "what does this do?"], &["outline"], &["clear"]];
 
     for args in cases {
         let output = laudit(args);
@@ -372,6 +359,100 @@ fn offline_build_writes_index_and_skeleton_artifacts() {
         first_skeleton, second_skeleton,
         "skeleton is not deterministic"
     );
+}
+
+#[test]
+fn build_check_succeeds_quietly_when_artifacts_are_fresh() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["build", "--offline", "--check", "--quiet", "--repo", &repo],
+    );
+    assert!(
+        output.status.success(),
+        "check failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty(), "quiet wrote stdout");
+    assert!(output.stderr.is_empty(), "quiet wrote stderr");
+}
+
+#[test]
+fn build_check_fails_when_artifacts_are_missing() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["build", "--offline", "--check", "--quiet", "--repo", &repo],
+    );
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty(), "quiet wrote stdout");
+    assert!(!temp.path().join(".laudit/skeleton.json").exists());
+    assert!(!temp.path().join(".laudit/model.json").exists());
+}
+
+#[test]
+fn build_check_fails_when_artifacts_are_stale_without_rewriting_them() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(build.status.success());
+
+    let skeleton_path = temp.path().join(".laudit/skeleton.json");
+    let before = fs::read(&skeleton_path).expect("read skeleton");
+    fs::write(
+        temp.path().join("src/hub.rs"),
+        "pub fn hub() {}\npub fn extra() {}\n",
+    )
+    .expect("edit source");
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["build", "--offline", "--check", "--quiet", "--repo", &repo],
+    );
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty(), "quiet wrote stdout");
+    assert_eq!(
+        fs::read(&skeleton_path).expect("read skeleton"),
+        before,
+        "check must not rewrite artifacts"
+    );
+}
+
+#[test]
+fn build_check_reports_freshness_without_quiet() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(build.status.success());
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["build", "--offline", "--check", "--repo", &repo],
+    );
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("fresh"), "got: {stdout}");
 }
 
 #[tokio::test]

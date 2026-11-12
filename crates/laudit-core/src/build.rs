@@ -17,8 +17,8 @@ use crate::model::{CodebaseModel, Skeleton, SCHEMA_VERSION};
 use crate::recon::index::index_path;
 use crate::recon::walk::walk;
 use crate::recon::{
-    build_index, content_hash, detect_entrypoints, head as git_head, mine_files, Entrypoint, Graph,
-    Index, IndexBuild, Provenance, WalkError,
+    build_index, build_index_readonly, content_hash, detect_entrypoints, head as git_head,
+    mine_files, Entrypoint, Graph, Index, IndexBuild, Provenance, WalkError,
 };
 
 /// Repository-relative path of the structural skeleton artifact.
@@ -120,9 +120,32 @@ pub struct ReconReport {
 /// comprehension, which must be able to inspect an existing `model.json` before
 /// deciding whether its cache is still valid.
 pub fn recon(repo_root: impl AsRef<Path>, config: &Config) -> Result<ReconReport, BuildError> {
+    recon_with(repo_root, config, true)
+}
+
+/// Run Stage 0 recon without writing the incremental index or any artifact.
+///
+/// This is the read-only counterpart to [`recon`], used by `laudit build
+/// --check` so verification never mutates the working tree.
+pub fn recon_readonly(
+    repo_root: impl AsRef<Path>,
+    config: &Config,
+) -> Result<ReconReport, BuildError> {
+    recon_with(repo_root, config, false)
+}
+
+fn recon_with(
+    repo_root: impl AsRef<Path>,
+    config: &Config,
+    persist_index: bool,
+) -> Result<ReconReport, BuildError> {
     let repo_root = repo_root.as_ref();
     let files = walk(repo_root, config)?;
-    let index_build = build_index(repo_root, &files)?;
+    let index_build = if persist_index {
+        build_index(repo_root, &files)?
+    } else {
+        build_index_readonly(repo_root, &files)?
+    };
     let entrypoints = detect_entrypoints(repo_root, &files);
     let provenance = mine_files(repo_root, &files);
 
@@ -201,6 +224,96 @@ pub fn build_offline(
         skeleton_path,
         model_path,
     })
+}
+
+/// Why an offline artifact is not fresh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StaleReason {
+    /// The artifact does not exist on disk.
+    Missing,
+    /// Regenerating the artifact would produce different bytes.
+    Changed,
+}
+
+/// One stale offline artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StaleArtifact {
+    /// Path of the artifact.
+    pub path: PathBuf,
+    /// Why the artifact is stale.
+    pub reason: StaleReason,
+}
+
+/// The result of checking whether the offline artifacts are fresh.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CheckReport {
+    /// Whether every offline artifact matches a fresh regeneration.
+    pub fresh: bool,
+    /// Path of the structural skeleton artifact.
+    pub skeleton_path: PathBuf,
+    /// Path of the placeholder codebase model artifact.
+    pub model_path: PathBuf,
+    /// Artifacts that are missing or would change.
+    pub stale: Vec<StaleArtifact>,
+}
+
+/// Check whether the offline artifacts match a fresh regeneration.
+///
+/// This runs the same deterministic recon as [`build_offline`] but never writes
+/// anything: the incremental index is built in memory and the generated
+/// skeleton and placeholder model are compared byte-for-byte with the files on
+/// disk. A missing or different artifact makes the report stale.
+pub fn check_offline(
+    repo_root: impl AsRef<Path>,
+    config: &Config,
+) -> Result<CheckReport, BuildError> {
+    let repo_root = repo_root.as_ref();
+    let ReconReport { skeleton, .. } = recon_readonly(repo_root, config)?;
+    let model = offline_model(&skeleton);
+
+    let skeleton_path = repo_root.join(SKELETON_FILE);
+    let model_path = repo_root.join(MODEL_FILE);
+    let mut stale = Vec::new();
+
+    check_artifact(
+        &skeleton_path,
+        &serde_json::to_vec_pretty(&skeleton)?,
+        &mut stale,
+    )?;
+    check_artifact(&model_path, &serde_json::to_vec_pretty(&model)?, &mut stale)?;
+
+    Ok(CheckReport {
+        fresh: stale.is_empty(),
+        skeleton_path,
+        model_path,
+        stale,
+    })
+}
+
+fn check_artifact(
+    path: &Path,
+    expected: &[u8],
+    stale: &mut Vec<StaleArtifact>,
+) -> Result<(), BuildError> {
+    match fs::read(path) {
+        Ok(actual) if actual == expected => Ok(()),
+        Ok(_) => {
+            stale.push(StaleArtifact {
+                path: path.to_path_buf(),
+                reason: StaleReason::Changed,
+            });
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            stale.push(StaleArtifact {
+                path: path.to_path_buf(),
+                reason: StaleReason::Missing,
+            });
+            Ok(())
+        }
+        Err(error) => Err(BuildError::Io(error)),
+    }
 }
 
 fn skeleton(

@@ -22,8 +22,8 @@ pub use git::{
 };
 pub use graph::{Community, FileEdge, FileNode, Graph, SymbolEdge, SymbolNode};
 pub use index::{
-    build as build_index, content_hash, ensure_gitignore, load as load_index, save as save_index,
-    BuildStats, FileEntry, Index, IndexBuild,
+    build as build_index, build_readonly as build_index_readonly, content_hash, ensure_gitignore,
+    load as load_index, save as save_index, BuildStats, FileEntry, Index, IndexBuild,
 };
 pub use parse::{parse_file, parse_files, parse_source, Tag, TagKind};
 pub use walk::{Language, SourceFile, WalkError, WalkOptions};
