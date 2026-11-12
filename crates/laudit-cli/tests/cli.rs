@@ -273,4 +273,25 @@ async fn non_offline_build_writes_model_with_mock_llm() {
     assert_eq!(model["model"], "test-model");
     assert_eq!(model["glossary"][0]["term"], "Term");
     assert!(model["subsystems"].is_array());
+
+    let tours_dir = temp.path().join(".laudit/tours");
+    let tour_path = fs::read_dir(&tours_dir)
+        .expect("tours dir")
+        .next()
+        .expect("a tour artifact")
+        .expect("tour entry")
+        .path();
+    let tour: serde_json::Value =
+        serde_json::from_slice(&fs::read(&tour_path).expect("read tour")).expect("parse tour");
+    assert_eq!(tour["schema_version"], 1);
+    assert_eq!(tour["source"]["kind"], "codebase");
+    assert!(tour["chapters"]
+        .as_array()
+        .is_some_and(|chapters| !chapters.is_empty()));
+    for chapter in tour["chapters"].as_array().expect("chapters") {
+        for stop in chapter["stops"].as_array().expect("stops") {
+            assert!(stop["start_line"].as_u64().is_some_and(|line| line >= 1));
+            assert!(stop["end_line"].as_u64().is_some_and(|line| line >= 1));
+        }
+    }
 }

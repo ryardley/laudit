@@ -78,6 +78,12 @@ struct BuildArgs {
     /// Suppress progress output
     #[arg(long)]
     quiet: bool,
+    /// Include test files in the tour plan
+    #[arg(long)]
+    include_tests: bool,
+    /// Exclude configuration files from the tour plan
+    #[arg(long)]
+    skip_config: bool,
 }
 
 #[derive(Debug, Args)]
@@ -239,6 +245,23 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
             for file in &report.dropped_files {
                 eprintln!("laudit: warning: dropped unknown file {file}");
             }
+
+            let plan_options = laudit_core::plan::PlanOptions {
+                include_tests: args.include_tests,
+                include_config: !args.skip_config,
+            };
+            let plan =
+                match laudit_core::plan::plan_from_artifacts(&repo_root, &config, &plan_options) {
+                    Ok(plan) => plan,
+                    Err(error) => {
+                        eprintln!("laudit build: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+            for id in &plan.dropped_ids {
+                eprintln!("laudit: warning: dropped unknown symbol id {id}");
+            }
+
             if json {
                 match serde_json::to_string_pretty(&report) {
                     Ok(rendered) => println!("{rendered}"),
@@ -249,6 +272,7 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
                 }
             } else if !args.quiet {
                 print_comprehension_summary(&report);
+                print_plan_summary(&plan);
             }
             ExitCode::SUCCESS
         }
@@ -257,6 +281,18 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
             ExitCode::FAILURE
         }
     }
+}
+
+fn print_plan_summary(report: &laudit_core::plan::PlanReport) {
+    let stops: usize = report
+        .tour
+        .chapters
+        .iter()
+        .map(|chapter| chapter.stops.len())
+        .sum();
+    println!("  tour:         {}", report.tour_path.display());
+    println!("  tour chapters: {}", report.tour.chapters.len());
+    println!("  tour stops:   {stops}");
 }
 
 fn print_comprehension_summary(report: &laudit_core::comprehension::ComprehensionReport) {

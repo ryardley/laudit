@@ -5,6 +5,7 @@ pub mod comprehension;
 pub mod config;
 pub mod llm;
 pub mod model;
+pub mod plan;
 pub mod prompts;
 pub mod recon;
 pub mod redact;
