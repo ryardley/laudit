@@ -13,10 +13,12 @@ workspace = true
 bytes = "1.10.1"
 futures-util = "0.3.31"
 ignore = "0.4.23"
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
 regex = "1.13.1"
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
 tokio = { version = "1.53.3", features = ["rt", "macros", "io-std", "io-util", "sync", "time"] }
 toml = { version = "0.8.19", default-features = false, features = ["parse"] }
 tree-sitter = "0.25.10"
@@ -29,6 +31,7 @@ tree-sitter-sequel = "0.3.13"
 tree-sitter-toml-ng = "0.7.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-yaml = "0.7.2"
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-default-fancy"] }
 streaming-iterator = "0.1.9"
 
 [dev-dependencies]

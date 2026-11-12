@@ -1,6 +1,6 @@
 ---
 id: lc-1str
-status: open
+status: closed
 deps: [lc-taeh]
 links: []
 created: 2026-11-12T09:02:36Z

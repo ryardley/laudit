@@ -120,7 +120,7 @@ struct ExportArgs {
     /// Render to a self-contained HTML document
     #[arg(long)]
     html: bool,
-    /// Output path
+    /// Output file, or directory (writes index.html)
     #[arg(long, value_name = "PATH")]
     out: Option<PathBuf>,
 }
@@ -562,15 +562,26 @@ fn print_explain_offline(
 }
 
 fn run_export(repo: Option<PathBuf>, args: ExportArgs) -> ExitCode {
-    if args.html {
-        return not_implemented("export --html", &args);
-    }
-
     let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
     let out = args
         .out
         .as_deref()
         .filter(|path| *path != std::path::Path::new("-"));
+
+    if args.html {
+        return match laudit_core::export::export_html(&repo_root, None, out) {
+            Ok(report) => {
+                if out.is_none() {
+                    print!("{}", report.html);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("laudit export: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     match laudit_core::export::export_markdown(&repo_root, None, out) {
         Ok(report) => {

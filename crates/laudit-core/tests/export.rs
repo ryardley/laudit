@@ -4,7 +4,7 @@
 //! golden snapshot pins the exact document shape, and the range test proves the
 //! fenced code blocks contain the source lines the stops point at.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use laudit_core::build::{self, build_offline};
 use laudit_core::config::Config;
-use laudit_core::export::{render_markdown, MarkdownOptions};
+use laudit_core::export::{render_html, render_markdown, HtmlOptions, MarkdownOptions};
 use laudit_core::model::{
     CodebaseModel, Position, Skeleton, Stop, StopStatus, Tour, TourChapter, TourSource,
     SCHEMA_VERSION,
@@ -276,4 +276,73 @@ fn offline_tour_renders_without_network() {
     assert!(markdown.contains("```"), "got:\n{markdown}");
     assert!(markdown.contains("**Why here:**"), "got:\n{markdown}");
     assert!(!markdown.contains("Refs:"), "got:\n{markdown}");
+}
+
+fn anchors(html: &str) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut ids = BTreeSet::new();
+    let mut hrefs = BTreeSet::new();
+    for part in html.split("id=\"").skip(1) {
+        if let Some(end) = part.find('"') {
+            ids.insert(part[..end].to_owned());
+        }
+    }
+    for part in html.split("href=\"#").skip(1) {
+        if let Some(end) = part.find('"') {
+            hrefs.insert(part[..end].to_owned());
+        }
+    }
+    (ids, hrefs)
+}
+
+#[test]
+fn rust_app_tour_html_has_resolvable_anchors() {
+    let html = render_html(
+        fixture_root(),
+        &tour(),
+        &model(),
+        Some(&skeleton()),
+        &HtmlOptions::default(),
+    )
+    .expect("render html");
+
+    assert!(html.starts_with("<!DOCTYPE html>"));
+    assert!(html.contains("class=\"sidebar\""));
+    assert!(html.contains("hl-keyword"));
+    assert!(html.contains("id=\"symbol-sym-main\""));
+
+    let (ids, hrefs) = anchors(&html);
+    for href in &hrefs {
+        assert!(ids.contains(href), "missing anchor for #{href}");
+    }
+    assert!(hrefs.contains("symbol-sym-hub"));
+    assert!(hrefs.contains("symbol-sym-helper"));
+}
+
+#[test]
+fn offline_tour_renders_html_without_network_assets() {
+    let temp = TempDir::new();
+    let repo = temp.path().join("rust-app");
+    copy_dir_all(&fixture_root(), &repo).expect("copy fixture");
+    let config = Config::load_from_offline(None, None).expect("offline config");
+
+    build_offline(&repo, &config).expect("offline build");
+    let skeleton = plan::load_skeleton(&repo).expect("load skeleton");
+    let model = build::offline_model(&skeleton);
+    let report = plan::plan(&repo, &config, &skeleton, &model, &PlanOptions::default())
+        .expect("plan offline tour");
+
+    let html = render_html(
+        &repo,
+        &report.tour,
+        &model,
+        Some(&skeleton),
+        &HtmlOptions::default(),
+    )
+    .expect("render offline html");
+
+    assert!(html.starts_with("<!DOCTYPE html>"), "got:\n{html}");
+    assert!(html.contains("class=\"sidebar\""), "got:\n{html}");
+    assert!(!html.contains("<link "), "got:\n{html}");
+    assert!(!html.contains("src=\"http"), "got:\n{html}");
+    assert!(!html.contains("href=\"http"), "got:\n{html}");
 }

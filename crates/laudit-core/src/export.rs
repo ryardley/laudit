@@ -1,19 +1,29 @@
-//! Markdown export of a tour.
+//! Markdown and HTML export of a tour.
 //!
-//! Export turns a persisted tour artifact into a shareable markdown document
-//! (D23). It reads only artifacts and source files — never the LLM — so it
-//! works offline and can render tours whose stops are still pending. The
-//! document is deterministic: no timestamps or other run-specific values are
-//! written into the body, which keeps golden tests stable.
+//! Export turns a persisted tour artifact into a shareable document (D23). It
+//! reads only artifacts and source files — never the LLM — so it works offline
+//! and can render tours whose stops are still pending. The documents are
+//! deterministic: no timestamps or other run-specific values are written into
+//! the body, which keeps golden tests stable.
+//!
+//! HTML export produces a single self-contained file: inline CSS, inline
+//! highlighting, and in-document anchors keyed by symbol ID. No network assets
+//! are referenced, so the page opens and works offline.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
+use pulldown_cmark::{html, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
+use regex::Regex;
 use serde::Serialize;
+use syntect::html::{ClassStyle, ClassedHTMLGenerator};
+use syntect::parsing::{SyntaxReference, SyntaxSet};
+use syntect::util::LinesWithEndings;
 
 use crate::build;
 use crate::model::{CodebaseModel, Skeleton, Stop, Tour};
@@ -48,6 +58,32 @@ pub struct ExportReport {
     /// The rendered markdown.
     #[serde(skip)]
     pub markdown: String,
+}
+
+/// Options controlling HTML rendering.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HtmlOptions {
+    /// Document title. Defaults to the repository directory name.
+    pub title: Option<String>,
+}
+
+/// A summary of an HTML export.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HtmlExportReport {
+    /// Tour identifier that was rendered.
+    pub tour_id: String,
+    /// Path of the tour artifact.
+    pub tour_path: PathBuf,
+    /// Path the HTML was written to, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_path: Option<PathBuf>,
+    /// Number of chapters rendered.
+    pub chapters: usize,
+    /// Number of stops rendered.
+    pub stops: usize,
+    /// The rendered HTML.
+    #[serde(skip)]
+    pub html: String,
 }
 
 /// Render a tour as a markdown document.
@@ -127,6 +163,128 @@ pub fn render_markdown(
     Ok(out)
 }
 
+/// Render a tour as a single self-contained HTML document.
+///
+/// The page has a chapter navigation sidebar, one section per stop with a code
+/// pane and a prose pane, and in-document anchors keyed by symbol ID. Code is
+/// highlighted with syntect and prose is rendered from markdown. All CSS and
+/// JavaScript are inline; the document references no network assets.
+pub fn render_html(
+    repo_root: impl AsRef<Path>,
+    tour: &Tour,
+    model: &CodebaseModel,
+    skeleton: Option<&Skeleton>,
+    options: &HtmlOptions,
+) -> Result<String, ExportError> {
+    let repo_root = repo_root.as_ref();
+    let title = options
+        .title
+        .clone()
+        .unwrap_or_else(|| default_title(repo_root, model));
+    let symbols = symbol_index(tour, skeleton);
+    let known_symbols: BTreeSet<String> = symbols.keys().cloned().collect();
+    let stop_symbols: BTreeSet<String> = tour
+        .chapters
+        .iter()
+        .flat_map(|chapter| chapter.stops.iter().map(|stop| stop.symbol_id.clone()))
+        .collect();
+    let stop_count: usize = tour
+        .chapters
+        .iter()
+        .map(|chapter| chapter.stops.len())
+        .sum();
+
+    let mut out = String::new();
+    out.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
+    out.push_str("<meta charset=\"utf-8\">\n");
+    out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
+    let _ = writeln!(out, "<title>{}</title>", escape_html(&title));
+    out.push_str("<style>\n");
+    out.push_str(HTML_CSS);
+    out.push_str("</style>\n</head>\n<body>\n");
+    let _ = writeln!(
+        out,
+        "<header class=\"topbar\"><h1>{}</h1><p class=\"tour-meta\">{} chapters · {} stops</p></header>",
+        escape_html(&title),
+        tour.chapters.len(),
+        stop_count
+    );
+    out.push_str("<div class=\"layout\">\n");
+    render_nav(&mut out, tour);
+    out.push_str("<main class=\"content\">\n");
+
+    for chapter in &tour.chapters {
+        let _ = writeln!(
+            out,
+            "<section class=\"chapter\" id=\"{}\">",
+            chapter_anchor(&chapter.id)
+        );
+        let _ = writeln!(out, "<h2>{}</h2>", escape_html(&chapter.title));
+        for stop in &chapter.stops {
+            render_stop(&mut out, repo_root, stop, &symbols, &known_symbols)?;
+        }
+        out.push_str("</section>\n");
+    }
+
+    out.push_str("<section class=\"symbol-index\" hidden aria-hidden=\"true\">\n");
+    for id in symbols.keys() {
+        if !stop_symbols.contains(id) {
+            let _ = writeln!(out, "<a id=\"{}\"></a>", symbol_anchor(id));
+        }
+    }
+    out.push_str("</section>\n</main>\n</div>\n");
+    out.push_str("<script>\n");
+    out.push_str(HTML_JS);
+    out.push_str("</script>\n</body>\n</html>\n");
+    Ok(out)
+}
+
+/// Load the latest (or named) tour and its artifacts, render HTML, and
+/// optionally write it to `out`.
+///
+/// When `out` is a directory, ends with a path separator, or is a new path
+/// without an extension, the document is written to `index.html` inside it.
+/// Otherwise `out` is treated as a file. When `out` is `None` the HTML is
+/// returned in [`HtmlExportReport::html`] for the caller to print. No LLM or
+/// network access is involved.
+pub fn export_html(
+    repo_root: impl AsRef<Path>,
+    tour_id: Option<&str>,
+    out: Option<&Path>,
+) -> Result<HtmlExportReport, ExportError> {
+    let repo_root = repo_root.as_ref();
+    let (tour, tour_path) = load_tour(repo_root, tour_id)?;
+    let skeleton = load_skeleton(repo_root)?;
+    let model = load_model(repo_root, skeleton.as_ref())?;
+    let html = render_html(
+        repo_root,
+        &tour,
+        &model,
+        skeleton.as_ref(),
+        &HtmlOptions::default(),
+    )?;
+
+    let output_path = match out {
+        Some(path) => Some(write_output(&resolve_html_output(path), &html)?),
+        None => None,
+    };
+
+    let chapters = tour.chapters.len();
+    let stops = tour
+        .chapters
+        .iter()
+        .map(|chapter| chapter.stops.len())
+        .sum();
+    Ok(HtmlExportReport {
+        tour_id: tour.tour_id,
+        tour_path,
+        output_path,
+        chapters,
+        stops,
+        html,
+    })
+}
+
 /// Load the latest (or named) tour and its artifacts, render markdown, and
 /// optionally write it to `out`.
 ///
@@ -150,21 +308,7 @@ pub fn export_markdown(
     )?;
 
     let output_path = match out {
-        Some(path) => {
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    fs::create_dir_all(parent).map_err(|source| ExportError::Io {
-                        path: parent.to_path_buf(),
-                        source,
-                    })?;
-                }
-            }
-            fs::write(path, &markdown).map_err(|source| ExportError::Io {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            Some(path.to_path_buf())
-        }
+        Some(path) => Some(write_output(path, &markdown)?),
         None => None,
     };
 
@@ -234,6 +378,434 @@ fn default_title(repo_root: &Path, model: &CodebaseModel) -> String {
     }
     DEFAULT_TITLE.to_owned()
 }
+
+fn write_output(path: &Path, contents: &str) -> Result<PathBuf, ExportError> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|source| ExportError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+    }
+    fs::write(path, contents).map_err(|source| ExportError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(path.to_path_buf())
+}
+
+fn resolve_html_output(path: &Path) -> PathBuf {
+    let looks_like_directory = path.is_dir()
+        || path_ends_with_separator(path)
+        || (!path.exists() && path.extension().is_none());
+    if looks_like_directory {
+        path.join("index.html")
+    } else {
+        path.to_path_buf()
+    }
+}
+
+fn path_ends_with_separator(path: &Path) -> bool {
+    let rendered = path.to_string_lossy();
+    rendered.ends_with('/') || rendered.ends_with('\\')
+}
+
+fn render_nav(out: &mut String, tour: &Tour) {
+    out.push_str("<nav class=\"sidebar\" aria-label=\"Tour navigation\">\n");
+    for chapter in &tour.chapters {
+        out.push_str("<section class=\"nav-chapter\">\n");
+        let _ = writeln!(
+            out,
+            "<a class=\"nav-chapter-title\" href=\"#{}\">{}</a>",
+            chapter_anchor(&chapter.id),
+            escape_html(&chapter.title)
+        );
+        out.push_str("<ol class=\"nav-stops\">\n");
+        for stop in &chapter.stops {
+            let _ = writeln!(
+                out,
+                "<li><a href=\"#{}\">{}</a></li>",
+                stop_anchor(&stop.id),
+                escape_html(stop_title(stop))
+            );
+        }
+        out.push_str("</ol>\n</section>\n");
+    }
+    out.push_str("</nav>\n");
+}
+
+fn render_stop(
+    out: &mut String,
+    repo_root: &Path,
+    stop: &Stop,
+    symbols: &BTreeMap<String, SymbolRef>,
+    known_symbols: &BTreeSet<String>,
+) -> Result<(), ExportError> {
+    let _ = writeln!(
+        out,
+        "<article class=\"stop\" id=\"{}\">",
+        stop_anchor(&stop.id)
+    );
+    let _ = writeln!(
+        out,
+        "<a class=\"symbol-anchor\" id=\"{}\"></a>",
+        symbol_anchor(&stop.symbol_id)
+    );
+    let _ = writeln!(
+        out,
+        "<header class=\"stop-header\"><h3>{}</h3><p class=\"location\">{}:{}-{}</p></header>",
+        escape_html(stop_title(stop)),
+        escape_html(&stop.file),
+        stop.start_line,
+        stop.end_line
+    );
+    out.push_str("<div class=\"panes\">\n<div class=\"code-pane\">\n");
+
+    let code = read_range(repo_root, stop)?;
+    let language = Language::from_path(Path::new(&stop.file));
+    let highlighted = highlight_code(&code, language);
+    let language_class = language.map_or("", Language::as_str);
+    let _ = writeln!(
+        out,
+        "<pre><code class=\"language-{}\">{}</code></pre>",
+        escape_html(language_class),
+        highlighted
+    );
+    out.push_str("</div>\n<div class=\"prose-pane\">\n");
+
+    if !stop.why_here.is_empty() {
+        let _ = writeln!(
+            out,
+            "<p class=\"why\"><strong>Why here:</strong> {}</p>",
+            escape_html(&stop.why_here)
+        );
+    }
+
+    if !stop.explanation.is_empty() {
+        out.push_str("<div class=\"explanation\">\n");
+        out.push_str(&render_markdown_body(&stop.explanation, known_symbols));
+        out.push_str("</div>\n");
+    }
+
+    if !stop.refs.is_empty() {
+        out.push_str("<div class=\"refs\"><span class=\"refs-label\">Refs:</span> ");
+        for (index, id) in stop.refs.iter().enumerate() {
+            if index > 0 {
+                out.push_str(", ");
+            }
+            match symbols.get(id) {
+                Some(symbol) => {
+                    let _ = write!(
+                        out,
+                        "<a href=\"#{}\">{}</a>",
+                        symbol_anchor(id),
+                        escape_html(&symbol.name)
+                    );
+                }
+                None => out.push_str(&escape_html(id)),
+            }
+        }
+        out.push_str("</div>\n");
+    }
+
+    out.push_str("</div>\n</div>\n</article>\n");
+    Ok(())
+}
+
+fn stop_title(stop: &Stop) -> &str {
+    if stop.title.is_empty() {
+        &stop.symbol_id
+    } else {
+        &stop.title
+    }
+}
+
+fn highlight_code(code: &str, language: Option<Language>) -> String {
+    let syntax_set = syntax_set();
+    let syntax = language
+        .and_then(|language| syntax_for(language, syntax_set))
+        .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
+    let mut generator = ClassedHTMLGenerator::new_with_class_style(
+        syntax,
+        syntax_set,
+        ClassStyle::SpacedPrefixed { prefix: "hl-" },
+    );
+    let mut code = code.to_owned();
+    if !code.ends_with('\n') {
+        code.push('\n');
+    }
+    for line in LinesWithEndings::from(&code) {
+        if generator
+            .parse_html_for_line_which_includes_newline(line)
+            .is_err()
+        {
+            return escape_html(&code);
+        }
+    }
+    generator.finalize()
+}
+
+fn syntax_set() -> &'static SyntaxSet {
+    static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
+    SYNTAX_SET.get_or_init(two_face::syntax::extra_newlines)
+}
+
+fn syntax_for(language: Language, syntax_set: &SyntaxSet) -> Option<&SyntaxReference> {
+    let extension = match language {
+        Language::Rust => "rs",
+        Language::TypeScript => "ts",
+        Language::Tsx => "tsx",
+        Language::JavaScript => "js",
+        Language::Bash => "sh",
+        Language::Toml => "toml",
+        Language::Yaml => "yaml",
+        Language::Json => "json",
+        Language::Markdown => "md",
+        Language::Sql => "sql",
+    };
+    syntax_set
+        .find_syntax_by_extension(extension)
+        .or_else(|| syntax_set.find_syntax_by_token(extension))
+        .or_else(|| match language {
+            Language::Tsx => syntax_set.find_syntax_by_extension("ts"),
+            Language::TypeScript => syntax_set.find_syntax_by_extension("js"),
+            _ => None,
+        })
+}
+
+fn render_markdown_body(markdown: &str, known_symbols: &BTreeSet<String>) -> String {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TASKLISTS);
+    options.insert(Options::ENABLE_FOOTNOTES);
+    let parser = Parser::new_ext(markdown, options);
+    let mut events = Vec::new();
+    let mut in_code_block = false;
+    let mut link_depth = 0usize;
+    for event in parser {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => {
+                in_code_block = true;
+                events.push(event);
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                in_code_block = false;
+                events.push(event);
+            }
+            Event::Start(Tag::Link { .. }) => {
+                link_depth += 1;
+                events.push(event);
+            }
+            Event::End(TagEnd::Link) => {
+                link_depth = link_depth.saturating_sub(1);
+                events.push(event);
+            }
+            Event::Text(text) if !in_code_block && link_depth == 0 => {
+                push_linked_text(&mut events, &text, known_symbols);
+            }
+            Event::Html(html) | Event::InlineHtml(html) => {
+                events.push(Event::Text(html));
+            }
+            other => events.push(other),
+        }
+    }
+    let mut html = String::new();
+    html::push_html(&mut html, events.into_iter());
+    html
+}
+
+fn push_linked_text<'a>(events: &mut Vec<Event<'a>>, text: &str, known_symbols: &BTreeSet<String>) {
+    let mut last = 0;
+    for found in symbol_ref_regex().find_iter(text) {
+        if found.start() > last {
+            events.push(Event::Text(CowStr::from(
+                text[last..found.start()].to_owned(),
+            )));
+        }
+        let id = found.as_str();
+        if known_symbols.contains(id) {
+            events.push(Event::Start(Tag::Link {
+                link_type: LinkType::Inline,
+                dest_url: CowStr::from(format!("#{}", symbol_anchor(id))),
+                title: CowStr::from(String::new()),
+                id: CowStr::from(String::new()),
+            }));
+            events.push(Event::Text(CowStr::from(id.to_owned())));
+            events.push(Event::End(TagEnd::Link));
+        } else {
+            events.push(Event::Text(CowStr::from(id.to_owned())));
+        }
+        last = found.end();
+    }
+    if last < text.len() {
+        events.push(Event::Text(CowStr::from(text[last..].to_owned())));
+    }
+}
+
+fn symbol_ref_regex() -> &'static Regex {
+    static SYMBOL_REF: OnceLock<Regex> = OnceLock::new();
+    SYMBOL_REF
+        .get_or_init(|| Regex::new(r"\bsym-[A-Za-z0-9_-]+\b").expect("symbol ref regex compiles"))
+}
+
+fn escape_html(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn anchor(prefix: &str, id: &str) -> String {
+    let mut anchor = String::with_capacity(prefix.len() + id.len());
+    anchor.push_str(prefix);
+    for character in id.chars() {
+        if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':') {
+            anchor.push(character);
+        } else {
+            anchor.push('-');
+        }
+    }
+    anchor
+}
+
+fn chapter_anchor(id: &str) -> String {
+    anchor("chapter-", id)
+}
+
+fn stop_anchor(id: &str) -> String {
+    anchor("stop-", id)
+}
+
+fn symbol_anchor(id: &str) -> String {
+    anchor("symbol-", id)
+}
+
+const HTML_CSS: &str = r#"
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #656d76;
+  --border: #d0d7de;
+  --accent: #0969da;
+  --code-bg: #f6f8fa;
+  --sidebar-bg: #f6f8fa;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --border: #30363d;
+    --accent: #58a6ff;
+    --code-bg: #161b22;
+    --sidebar-bg: #161b22;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.5;
+}
+a { color: var(--accent); }
+.topbar { padding: 1rem 1.5rem; border-bottom: 1px solid var(--border); }
+.topbar h1 { margin: 0; font-size: 1.4rem; }
+.tour-meta { margin: .25rem 0 0; color: var(--muted); font-size: .9rem; }
+.layout { display: grid; grid-template-columns: 18rem minmax(0, 1fr); min-height: calc(100vh - 5rem); }
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100vh;
+  overflow: auto;
+  padding: 1rem;
+  border-right: 1px solid var(--border);
+  background: var(--sidebar-bg);
+}
+.nav-chapter { margin-bottom: 1rem; }
+.nav-chapter-title { font-weight: 600; color: var(--fg); text-decoration: none; }
+.nav-stops { margin: .25rem 0 0; padding-left: 1.1rem; }
+.nav-stops a { color: var(--muted); text-decoration: none; font-size: .9rem; }
+.nav-stops a:hover, .nav-stops a.active { color: var(--accent); }
+.content { padding: 1.5rem; max-width: 90rem; }
+.chapter { margin-bottom: 2.5rem; }
+.chapter h2 { border-bottom: 1px solid var(--border); padding-bottom: .25rem; }
+.stop { margin: 1.5rem 0; border: 1px solid var(--border); border-radius: .5rem; overflow: hidden; }
+.stop-header { padding: .75rem 1rem; border-bottom: 1px solid var(--border); background: var(--sidebar-bg); }
+.stop-header h3 { margin: 0; font-size: 1.1rem; }
+.location {
+  margin: .25rem 0 0;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .85rem;
+}
+.panes { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+.code-pane { border-right: 1px solid var(--border); background: var(--code-bg); overflow: auto; }
+.code-pane pre { margin: 0; padding: 1rem; overflow: auto; }
+.code-pane code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .85rem;
+  line-height: 1.45;
+}
+.prose-pane { padding: 1rem; }
+.prose-pane > :first-child { margin-top: 0; }
+.why { color: var(--muted); }
+.refs { margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--border); font-size: .9rem; }
+.refs-label { font-weight: 600; }
+.symbol-anchor { display: block; position: relative; top: -1rem; visibility: hidden; }
+.hl-keyword, .hl-storage { color: #cf222e; }
+.hl-string { color: #0a3069; }
+.hl-comment { color: #6e7781; font-style: italic; }
+.hl-constant, .hl-support { color: #0550ae; }
+.hl-entity, .hl-variable { color: #953800; }
+.hl-meta { color: #8250df; }
+.hl-invalid { color: #ffffff; background: #cf222e; }
+@media (prefers-color-scheme: dark) {
+  .hl-keyword, .hl-storage { color: #ff7b72; }
+  .hl-string { color: #a5d6ff; }
+  .hl-comment { color: #8b949e; }
+  .hl-constant, .hl-support { color: #79c0ff; }
+  .hl-entity, .hl-variable { color: #ffa657; }
+  .hl-meta { color: #d2a8ff; }
+}
+@media (max-width: 60rem) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--border); }
+  .panes { grid-template-columns: 1fr; }
+  .code-pane { border-right: 0; border-bottom: 1px solid var(--border); }
+}
+"#;
+
+const HTML_JS: &str = r#"
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.nav-stops a'));
+  var byId = {};
+  links.forEach(function (link) {
+    byId[link.getAttribute('href').slice(1)] = link;
+  });
+  function activate() {
+    links.forEach(function (link) { link.classList.remove('active'); });
+    var link = byId[location.hash.slice(1)];
+    if (link) { link.classList.add('active'); }
+  }
+  window.addEventListener('hashchange', activate);
+  activate();
+})();
+"#;
 
 fn read_range(repo_root: &Path, stop: &Stop) -> Result<String, ExportError> {
     let path = repo_root.join(&stop.file);
@@ -649,5 +1221,107 @@ mod tests {
         let temp = TempDir::new();
         let error = export_markdown(temp.path(), None, None).expect_err("no tour");
         assert!(matches!(error, ExportError::NoTour));
+    }
+
+    #[test]
+    fn renders_self_contained_html_with_navigation_code_and_prose() {
+        let temp = TempDir::new();
+        temp.write("src/main.rs", "fn main() {\n    greet();\n}\n");
+        temp.write("src/lib.rs", "pub fn greet() {}\n");
+        let skeleton = skeleton(vec![
+            symbol("sym-main", "src/main.rs", "main", 1),
+            symbol("sym-greet", "src/lib.rs", "greet", 1),
+        ]);
+        let tour = tour(vec![stop("main", "src/main.rs", 1, 3, vec!["sym-greet"])]);
+
+        let html = render_html(
+            temp.path(),
+            &tour,
+            &model(),
+            Some(&skeleton),
+            &HtmlOptions::default(),
+        )
+        .expect("render");
+
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert!(html.contains("<title>"));
+        assert!(html.contains("class=\"sidebar\""));
+        assert!(html.contains("id=\"chapter-on-ramp\""));
+        assert!(html.contains("id=\"stop-main\""));
+        assert!(html.contains("id=\"symbol-sym-main\""));
+        assert!(html.contains("href=\"#symbol-sym-greet\""));
+        assert!(html.contains("<pre><code class=\"language-rust\">"));
+        assert!(html.contains("hl-keyword"));
+        assert!(html.contains("The explanation."));
+        assert!(!html.contains("<link "));
+        assert!(!html.contains("src=\"http"));
+    }
+
+    #[test]
+    fn html_escapes_code_and_raw_html_in_prose() {
+        let temp = TempDir::new();
+        temp.write("src/main.rs", "fn main() { let x = \"<tag>\"; }\n");
+        let skeleton = skeleton(vec![symbol("sym-main", "src/main.rs", "main", 1)]);
+        let mut stop = stop("main", "src/main.rs", 1, 1, Vec::new());
+        stop.explanation = "Use `<tag>` and <script>alert(1)</script>.".to_owned();
+        let tour = tour(vec![stop]);
+
+        let html = render_html(
+            temp.path(),
+            &tour,
+            &model(),
+            Some(&skeleton),
+            &HtmlOptions::default(),
+        )
+        .expect("render");
+
+        assert!(html.contains("&lt;tag&gt;"));
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!html.contains("<script>alert(1)</script>"));
+    }
+
+    #[test]
+    fn html_export_writes_a_file_or_a_directory_index() {
+        let temp = TempDir::new();
+        temp.write("src/main.rs", "fn main() {}\n");
+        let skeleton = skeleton(vec![symbol("sym-main", "src/main.rs", "main", 1)]);
+        let tour = tour(vec![stop("main", "src/main.rs", 1, 1, Vec::new())]);
+        plan::write_tour(temp.path(), &tour).expect("write tour");
+        build::write_skeleton(temp.path(), &skeleton).expect("write skeleton");
+        build::write_model(temp.path(), &model()).expect("write model");
+
+        let file = temp.path().join("out/tour.html");
+        let report = export_html(temp.path(), None, Some(&file)).expect("export file");
+        assert_eq!(report.output_path.as_deref(), Some(file.as_path()));
+        assert_eq!(fs::read_to_string(&file).expect("read file"), report.html);
+
+        let dir = temp.path().join("site");
+        fs::create_dir_all(&dir).expect("create dir");
+        let report = export_html(temp.path(), None, Some(&dir)).expect("export dir");
+        let index = dir.join("index.html");
+        assert_eq!(report.output_path.as_deref(), Some(index.as_path()));
+        assert!(index.is_file());
+    }
+
+    #[test]
+    fn every_bundled_language_has_a_highlighting_syntax() {
+        let syntax_set = syntax_set();
+        for language in [
+            Language::Rust,
+            Language::TypeScript,
+            Language::Tsx,
+            Language::JavaScript,
+            Language::Bash,
+            Language::Toml,
+            Language::Yaml,
+            Language::Json,
+            Language::Markdown,
+            Language::Sql,
+        ] {
+            assert!(
+                syntax_for(language, syntax_set).is_some(),
+                "missing syntax for {language}"
+            );
+        }
     }
 }
