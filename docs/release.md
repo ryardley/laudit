@@ -29,7 +29,7 @@ Download the artifact matching your platform, verify it, and put `laudit` on
 ```sh
 version=0.1.0
 target=x86_64-unknown-linux-gnu
-base="https://github.com/<owner>/laudit/releases/download/v${version}"
+base="https://github.com/ryardley/laudit/releases/download/v${version}"
 
 curl -fsSLO "${base}/laudit-${version}-${target}.tar.gz"
 curl -fsSLO "${base}/laudit-${version}-${target}.tar.gz.sha256"
@@ -79,8 +79,8 @@ nix develop                                  # dev shell (Rust, tk, opencode)
 Or directly from GitHub:
 
 ```sh
-nix run github:<owner>/laudit -- --version   # run without installing
-nix profile install github:<owner>/laudit    # install the binary
+nix run github:ryardley/laudit -- --version   # run without installing
+nix profile install github:ryardley/laudit    # install the binary
 ```
 
 The flake exposes `packages.<system>.laudit` (and `default`), `apps.<system>.laudit`

@@ -101,6 +101,21 @@ require('laudit').setup({
 })
 ```
 
+### lazy.nvim
+
+```lua
+{
+  'ryardley/laudit',
+  config = function()
+    require('laudit').setup({ keymaps = true })
+  end,
+}
+```
+
+The `laudit` binary must be on `$PATH` or set via `binary`. To build it from
+source on install, add `build = 'nvim --headless -u NONE -l build.lua'` and point
+`binary` at `<plugin>/target/release/laudit`.
+
 ## Exports
 
 - **Markdown:** document title, chapter headings, per-stop heading with

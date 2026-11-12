@@ -44,8 +44,8 @@ nix develop                                  # development shell
 From GitHub:
 
 ```sh
-nix run github:<owner>/laudit -- --version
-nix profile install github:<owner>/laudit
+nix run github:ryardley/laudit -- --version
+nix profile install github:ryardley/laudit
 ```
 
 The flake also exposes `packages.<system>.laudit-nvim` (the Lua plugin) and
@@ -66,6 +66,40 @@ require('laudit').setup({
 
 `setup{}` holds UI options only. Engine configuration lives in the config files
 described below.
+
+#### lazy.nvim
+
+Add the plugin to your lazy.nvim spec. The `laudit` binary must be on `$PATH`
+(see the install sections above), or point `binary` at it explicitly:
+
+```lua
+{
+  'ryardley/laudit',
+  config = function()
+    require('laudit').setup({
+      split = { side = 'right', size = 40 },
+      keymaps = true,
+    })
+  end,
+}
+```
+
+To compile the binary from source on install instead of installing it
+separately, add a `build` step (requires a Rust toolchain):
+
+```lua
+{
+  'ryardley/laudit',
+  build = 'nvim --headless -u NONE -l build.lua',
+  config = function()
+    require('laudit').setup({
+      binary = vim.fn.stdpath('data') .. '/lazy/laudit/target/release/laudit',
+    })
+  end,
+}
+```
+
+Run `:Lazy build laudit` to rebuild after updating.
 
 ## Quickstart
 
