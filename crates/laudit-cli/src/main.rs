@@ -63,7 +63,11 @@ enum Command {
     /// Print the tour outline
     Outline,
     /// Report model/tour presence and counts
-    Status,
+    Status {
+        /// Tour id to report; defaults to the most recent tour
+        #[arg(long, value_name = "ID")]
+        tour: Option<String>,
+    },
     /// List or print installed prompts
     Prompts(PromptsArgs),
     /// Remove generated artifacts
@@ -161,7 +165,7 @@ fn main() -> ExitCode {
         Some(Command::Ask { question }) => not_implemented("ask", &question),
         Some(Command::Mcp) => not_implemented("mcp", &()),
         Some(Command::Outline) => not_implemented("outline", &()),
-        Some(Command::Status) => not_implemented("status", &()),
+        Some(Command::Status { tour }) => run_status(cli.repo, cli.json, tour),
         Some(Command::Clear) => not_implemented("clear", &()),
     }
 }
@@ -281,6 +285,57 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
             ExitCode::FAILURE
         }
     }
+}
+
+fn run_status(repo: Option<PathBuf>, json: bool, tour: Option<String>) -> ExitCode {
+    let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
+    match laudit_core::status::status(&repo_root, tour.as_deref()) {
+        Ok(report) => {
+            if json {
+                match serde_json::to_string_pretty(&report) {
+                    Ok(rendered) => println!("{rendered}"),
+                    Err(error) => {
+                        eprintln!("laudit status: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            } else {
+                print_status_summary(&report);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("laudit status: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn print_status_summary(report: &laudit_core::status::StatusReport) {
+    println!("laudit status");
+    println!(
+        "  model:       {}",
+        if report.model_present {
+            "present"
+        } else {
+            "missing"
+        }
+    );
+    match &report.tour_path {
+        Some(path) => println!("  tour:        {}", path.display()),
+        None => println!("  tour:        none"),
+    }
+    if let Some(position) = report.position {
+        println!("  position:    {}:{}", position.chapter, position.stop);
+    }
+    println!("  chapters:    {}", report.chapters);
+    println!("  stops:       {}", report.stops);
+    println!("  explained:   {}", report.explained);
+    println!("  pending:     {}", report.pending);
+    println!("  streaming:   {}", report.streaming);
+    println!("  skipped:     {}", report.skipped);
+    println!("  failed:      {}", report.failed);
+    println!("  stale:       {}", report.stale);
 }
 
 fn print_plan_summary(report: &laudit_core::plan::PlanReport) {

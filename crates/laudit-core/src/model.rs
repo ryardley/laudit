@@ -281,6 +281,12 @@ pub struct Stop {
     /// Symbol IDs referenced by the explanation.
     #[serde(default)]
     pub refs: Vec<String>,
+    /// Content hash of the stop's file when it was last narrated.
+    ///
+    /// Used to invalidate a stop when its file changes. Empty for stops that
+    /// have not been narrated yet.
+    #[serde(default)]
+    pub file_hash: String,
     /// Narration status of the stop.
     #[serde(default)]
     pub status: StopStatus,
@@ -402,6 +408,7 @@ mod tests {
                     why_here: "Start here.".to_owned(),
                     explanation: "The program starts here.".to_owned(),
                     refs: vec!["sym-2".to_owned()],
+                    file_hash: "fnv1a128:abc".to_owned(),
                     status: StopStatus::Explained,
                 }],
             }],
@@ -583,11 +590,13 @@ mod tests {
             "why_here",
             "explanation",
             "refs",
+            "file_hash",
             "status",
         ] {
             assert!(stop.get(key).is_some(), "missing stop.{key}");
         }
         assert_eq!(stop["status"], json!("explained"));
+        assert_eq!(stop["file_hash"], json!("fnv1a128:abc"));
     }
 
     #[test]
@@ -679,11 +688,13 @@ mod tests {
                     "why_here": "…",
                     "explanation": "…markdown…",
                     "refs": ["sym-1"],
+                    "file_hash": "fnv1a128:abc",
                     "status": "explained"
                 }]
             }]
         });
         let tour: Tour = serde_json::from_value(value).expect("deserialize tour");
         assert_eq!(tour.chapters[0].stops[0].status, StopStatus::Explained);
+        assert_eq!(tour.chapters[0].stops[0].file_hash, "fnv1a128:abc");
     }
 }

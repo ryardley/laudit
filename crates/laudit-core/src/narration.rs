@@ -31,6 +31,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::build::{MODEL_FILE, SKELETON_FILE};
+use crate::cache;
 use crate::comprehension::REDACTIONS_FILE;
 use crate::config::Config;
 use crate::llm::{ChatMessage, ChatRequest, LlmClient};
@@ -77,8 +78,12 @@ pub struct NarrationReport {
     pub tour: Tour,
     /// Path of the persisted tour artifact.
     pub tour_path: PathBuf,
-    /// Number of stops that were explained.
+    /// Number of stops that were explained during this run.
     pub narrated: usize,
+    /// Number of already-explained stops that were reused from the cache.
+    pub cached: usize,
+    /// Stop IDs that were invalidated because their file changed.
+    pub invalidated: Vec<String>,
     /// Stops that were skipped, with the reason.
     pub skipped: Vec<SkippedStop>,
     /// Symbol references that were dropped because they were not provided.
@@ -105,11 +110,13 @@ pub struct DroppedRef {
     pub symbol_id: String,
 }
 
-/// Narrate every stop in `tour`, persisting prose into the tour artifact.
+/// Narrate every stop in `tour` that is not already explained.
 ///
 /// The tour is written after each stop so a frontend can observe progress and
-/// resume later. Per-stop failures are recorded in the report and marked
-/// [`StopStatus::Skipped`]; they never abort the run.
+/// resume later. Before narrating, explained stops whose file content hash no
+/// longer matches are invalidated and re-narrated; explained stops whose file
+/// is unchanged are reused from the cache. Per-stop failures are recorded in
+/// the report and marked [`StopStatus::Skipped`]; they never abort the run.
 pub async fn narrate(
     repo_root: impl AsRef<Path>,
     config: &Config,
@@ -127,21 +134,35 @@ pub async fn narrate(
 
     tour.prompt_version = prompt_version;
     tour.model = client.model().to_owned();
+    let invalidation = cache::invalidate_stale_stops(repo_root, tour);
     let tour_path = plan::write_tour(repo_root, tour)?;
 
     let mut report = NarrationReport {
         tour: tour.clone(),
         tour_path,
         narrated: 0,
+        cached: 0,
+        invalidated: invalidation.invalidated.clone(),
         skipped: Vec::new(),
         dropped_refs: Vec::new(),
-        warnings: Vec::new(),
+        warnings: invalidation
+            .invalidated
+            .iter()
+            .map(|stop_id| format!("invalidated stop {stop_id}: file changed"))
+            .collect(),
     };
 
     for chapter_index in 0..tour.chapters.len() {
         for stop_index in 0..tour.chapters[chapter_index].stops.len() {
             let chapter = tour.chapters[chapter_index].clone();
             let stop = chapter.stops[stop_index].clone();
+
+            if stop.status == StopStatus::Explained {
+                report.cached += 1;
+                continue;
+            }
+
+            let current_hash = cache::file_hash(repo_root, &stop.file).unwrap_or_default();
 
             tour.chapters[chapter_index].stops[stop_index].status = StopStatus::Streaming;
             plan::write_tour(repo_root, tour)?;
@@ -168,6 +189,7 @@ pub async fn narrate(
                     stop_mut.why_here = narrated.why;
                     stop_mut.explanation = narrated.body;
                     stop_mut.refs = narrated.refs;
+                    stop_mut.file_hash = current_hash;
                     stop_mut.status = StopStatus::Explained;
                     report.narrated += 1;
                     report.dropped_refs.extend(narrated.dropped_refs);
@@ -175,6 +197,7 @@ pub async fn narrate(
                 }
                 Err(reason) => {
                     let stop_mut = &mut tour.chapters[chapter_index].stops[stop_index];
+                    stop_mut.file_hash = current_hash;
                     stop_mut.status = StopStatus::Skipped;
                     report.skipped.push(SkippedStop {
                         stop_id: stop.id.clone(),
@@ -196,6 +219,20 @@ pub async fn narrate(
     Ok(report)
 }
 
+/// Resume a tour: invalidate stale stops, reuse explained stops, narrate the
+/// rest, and leave the saved position untouched.
+pub async fn resume(
+    repo_root: impl AsRef<Path>,
+    config: &Config,
+    skeleton: &Skeleton,
+    model: &CodebaseModel,
+    tour: &mut Tour,
+    client: &LlmClient,
+    sink: &mut dyn NarrationSink,
+) -> Result<NarrationReport, NarrationError> {
+    narrate(repo_root, config, skeleton, model, tour, client, sink).await
+}
+
 /// Load the skeleton, model, and tour artifacts and narrate the tour.
 pub async fn narrate_from_artifacts(
     repo_root: impl AsRef<Path>,
@@ -212,6 +249,17 @@ pub async fn narrate_from_artifacts(
         repo_root, config, &skeleton, &model, &mut tour, client, sink,
     )
     .await
+}
+
+/// Load the artifacts and resume a tour from its saved position.
+pub async fn resume_from_artifacts(
+    repo_root: impl AsRef<Path>,
+    config: &Config,
+    tour_id: &str,
+    client: &LlmClient,
+    sink: &mut dyn NarrationSink,
+) -> Result<NarrationReport, NarrationError> {
+    narrate_from_artifacts(repo_root, config, tour_id, client, sink).await
 }
 
 struct Narrator<'a> {

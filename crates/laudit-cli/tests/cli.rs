@@ -128,7 +128,6 @@ fn stubs_parse_documented_flags_and_exit_non_zero() {
         &["ask", "what does this do?"],
         &["mcp"],
         &["outline"],
-        &["status"],
         &["clear"],
     ];
 
@@ -294,4 +293,92 @@ async fn non_offline_build_writes_model_with_mock_llm() {
             assert!(stop["end_line"].as_u64().is_some_and(|line| line >= 1));
         }
     }
+}
+
+#[test]
+fn status_reports_tour_counts() {
+    let temp = TempDir::new();
+    fs::create_dir_all(temp.path().join(".laudit/tours")).expect("create tours dir");
+    fs::create_dir_all(temp.path().join("src")).expect("create src dir");
+    fs::write(temp.path().join("src/main.rs"), "fn main() {}\n").expect("write source");
+    let hash = laudit_core::recon::content_hash(b"fn main() {}\n");
+    let tour = json!({
+        "schema_version": 1,
+        "tool_version": env!("CARGO_PKG_VERSION"),
+        "tour_id": "tour-test",
+        "source": { "kind": "codebase" },
+        "model": "test-model",
+        "prompt_version": "1",
+        "redaction_profile": "default",
+        "position": { "chapter": 0, "stop": 1 },
+        "chapters": [{
+            "id": "ch-1",
+            "title": "On-ramp",
+            "stops": [
+                {
+                    "id": "stop-1",
+                    "file": "src/main.rs",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "symbol_id": "sym-1",
+                    "title": "main",
+                    "why_here": "Entrypoint.",
+                    "explanation": "Body.",
+                    "refs": [],
+                    "file_hash": hash,
+                    "status": "explained"
+                },
+                {
+                    "id": "stop-2",
+                    "file": "src/main.rs",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "symbol_id": "sym-2",
+                    "title": "helper",
+                    "why_here": "Helper.",
+                    "explanation": "",
+                    "refs": [],
+                    "file_hash": "",
+                    "status": "pending"
+                }
+            ]
+        }]
+    });
+    fs::write(
+        temp.path().join(".laudit/tours/tour-test.json"),
+        serde_json::to_vec_pretty(&tour).expect("serialize tour"),
+    )
+    .expect("write tour");
+
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let output = laudit(&["status", "--repo", &repo, "--json"]);
+    assert!(
+        output.status.success(),
+        "status failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("parse status");
+    assert_eq!(report["tour_present"], true);
+    assert_eq!(report["tour_id"], "tour-test");
+    assert_eq!(report["chapters"], 1);
+    assert_eq!(report["stops"], 2);
+    assert_eq!(report["explained"], 1);
+    assert_eq!(report["pending"], 1);
+    assert_eq!(report["stale"], 0);
+    assert_eq!(report["position"]["stop"], 1);
+}
+
+#[test]
+fn status_without_artifacts_succeeds() {
+    let temp = TempDir::new();
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let output = laudit(&["status", "--repo", &repo, "--json"]);
+    assert!(
+        output.status.success(),
+        "status failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).expect("parse status");
+    assert_eq!(report["tour_present"], false);
+    assert_eq!(report["stops"], 0);
 }

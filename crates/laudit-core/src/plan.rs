@@ -265,6 +265,7 @@ struct Builder<'a> {
     symbols: BTreeMap<&'a str, &'a SymbolNode>,
     ranges: BTreeMap<&'a str, (u32, u32)>,
     line_counts: BTreeMap<PathBuf, u32>,
+    file_hashes: BTreeMap<PathBuf, String>,
     seen: BTreeSet<String>,
 }
 
@@ -286,6 +287,7 @@ impl<'a> Builder<'a> {
 
         let mut ranges = BTreeMap::new();
         let mut line_counts = BTreeMap::new();
+        let mut file_hashes = BTreeMap::new();
         for (file, mut file_symbols) in by_file {
             file_symbols.sort_by(|a, b| {
                 a.line
@@ -293,18 +295,20 @@ impl<'a> Builder<'a> {
                     .then_with(|| a.name.cmp(&b.name))
                     .then_with(|| a.id.cmp(&b.id))
             });
-            let line_count = read_line_count(repo_root, file).ok();
-            if let Some(count) = line_count {
+            if let Ok(bytes) = fs::read(repo_root.join(file)) {
+                let text = String::from_utf8_lossy(&bytes);
+                let count = u32::try_from(text.lines().count()).unwrap_or(u32::MAX);
                 line_counts.insert(file.to_path_buf(), count);
+                file_hashes.insert(file.to_path_buf(), crate::recon::content_hash(&bytes));
             }
             for (index, symbol) in file_symbols.iter().enumerate() {
                 let start = symbol.line;
                 let end = match file_symbols.get(index + 1) {
                     Some(next) if next.line > start => next.line - 1,
                     Some(_) => start,
-                    None => line_count.unwrap_or(start),
+                    None => line_counts.get(file).copied().unwrap_or(start),
                 };
-                let end = line_count.map_or(end, |count| end.min(count));
+                let end = line_counts.get(file).map_or(end, |count| end.min(*count));
                 ranges.insert(symbol.id.as_str(), (start, end));
             }
         }
@@ -314,6 +318,7 @@ impl<'a> Builder<'a> {
             symbols,
             ranges,
             line_counts,
+            file_hashes,
             seen: BTreeSet::new(),
         }
     }
@@ -557,6 +562,11 @@ impl<'a> Builder<'a> {
             why_here: why_here.to_owned(),
             explanation: String::new(),
             refs: Vec::new(),
+            file_hash: self
+                .file_hashes
+                .get(&symbol.file)
+                .cloned()
+                .unwrap_or_default(),
             status: StopStatus::Pending,
         })
     }
@@ -652,12 +662,6 @@ fn symbol_for_entrypoint<'a>(
         .find(|symbol| symbol.line <= entrypoint.line)
         .copied()
         .or_else(|| candidates.first().copied())
-}
-
-fn read_line_count(repo_root: &Path, file: &Path) -> io::Result<u32> {
-    let bytes = fs::read(repo_root.join(file))?;
-    let text = String::from_utf8_lossy(&bytes);
-    Ok(u32::try_from(text.lines().count()).unwrap_or(u32::MAX))
 }
 
 fn is_test_path(path: &Path) -> bool {

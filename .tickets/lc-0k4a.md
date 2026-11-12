@@ -1,6 +1,6 @@
 ---
 id: lc-0k4a
-status: open
+status: closed
 deps: [lc-lz7a]
 links: []
 created: 2026-11-12T08:57:02Z

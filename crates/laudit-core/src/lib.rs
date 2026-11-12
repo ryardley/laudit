@@ -1,6 +1,7 @@
 //! Editor-agnostic engine for `laudit` guided codebase tours.
 
 pub mod build;
+pub mod cache;
 pub mod comprehension;
 pub mod config;
 pub mod llm;
@@ -11,6 +12,7 @@ pub mod prompts;
 pub mod recon;
 pub mod redact;
 pub mod rpc;
+pub mod status;
 
 /// The crate version, stamped into artifacts as `tool_version`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

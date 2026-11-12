@@ -11,7 +11,9 @@ use laudit_core::model::{
     CodebaseModel, Position, Skeleton, Stop, StopStatus, Subsystem, Tour, TourChapter, TourSource,
     SCHEMA_VERSION,
 };
-use laudit_core::narration::{narrate, narrate_from_artifacts, DroppedRef, NarrationSink};
+use laudit_core::narration::{
+    narrate, narrate_from_artifacts, resume_from_artifacts, DroppedRef, NarrationSink,
+};
 use laudit_core::recon::{Community, FileNode, SymbolNode};
 use serde_json::{json, Value};
 use wiremock::matchers::{method, path};
@@ -153,6 +155,86 @@ fn model(symbols: &[&str], file: &str) -> CodebaseModel {
     }
 }
 
+type FileSymbols<'a> = (&'a str, &'a [(&'a str, &'a str, u32)]);
+
+fn skeleton_files(files: &[FileSymbols<'_>]) -> Skeleton {
+    let mut file_nodes = Vec::new();
+    let mut symbols = Vec::new();
+    let mut community_files = Vec::new();
+    let mut community_symbols = Vec::new();
+    let mut ranked_files = Vec::new();
+    let mut ranked_symbols = Vec::new();
+    for (file, syms) in files {
+        file_nodes.push(FileNode {
+            path: PathBuf::from(*file),
+            rank: 1.0,
+            community: 0,
+        });
+        community_files.push(PathBuf::from(*file));
+        ranked_files.push((*file).to_owned());
+        for (id, name, line) in *syms {
+            symbols.push(SymbolNode {
+                id: (*id).to_owned(),
+                file: PathBuf::from(*file),
+                name: (*name).to_owned(),
+                line: *line,
+                rank: 1.0,
+                community: 0,
+            });
+            community_symbols.push((*id).to_owned());
+            ranked_symbols.push((*id).to_owned());
+        }
+    }
+    Skeleton {
+        schema_version: SCHEMA_VERSION,
+        tool_version: "0.1.0".to_owned(),
+        repo_id: "fnv1a128:test".to_owned(),
+        head: None,
+        dirty_hash: "fnv1a128:test".to_owned(),
+        files: file_nodes,
+        symbols,
+        communities: vec![Community {
+            id: 0,
+            files: community_files,
+            symbols: community_symbols,
+        }],
+        entrypoints: Vec::new(),
+        ranked_files,
+        ranked_symbols,
+        provenance: BTreeMap::new(),
+    }
+}
+
+fn model_files(files: &[(&str, &[&str])]) -> CodebaseModel {
+    let mut symbol_ids = Vec::new();
+    let mut file_paths = Vec::new();
+    for (file, syms) in files {
+        file_paths.push((*file).to_owned());
+        symbol_ids.extend(syms.iter().map(|id| (*id).to_owned()));
+    }
+    CodebaseModel {
+        schema_version: SCHEMA_VERSION,
+        tool_version: "0.1.0".to_owned(),
+        repo_id: "fnv1a128:test".to_owned(),
+        head: None,
+        dirty_hash: "fnv1a128:test".to_owned(),
+        generator: "laudit".to_owned(),
+        model: "test-model".to_owned(),
+        prompt_version: "1".to_owned(),
+        generated_at: "2026-11-12T00:00:00Z".to_owned(),
+        subsystems: vec![Subsystem {
+            id: "core".to_owned(),
+            title: "Core".to_owned(),
+            summary: "Core subsystem.".to_owned(),
+            symbol_ids,
+            files: file_paths,
+        }],
+        chapters: Vec::new(),
+        flows: Vec::new(),
+        glossary: Vec::new(),
+    }
+}
+
 fn stop(id: &str, symbol_id: &str, file: &str, start: u32, end: u32) -> Stop {
     Stop {
         id: id.to_owned(),
@@ -164,6 +246,7 @@ fn stop(id: &str, symbol_id: &str, file: &str, start: u32, end: u32) -> Stop {
         why_here: "Entrypoint.".to_owned(),
         explanation: String::new(),
         refs: Vec::new(),
+        file_hash: String::new(),
         status: StopStatus::Pending,
     }
 }
@@ -527,4 +610,155 @@ async fn narrate_from_artifacts_loads_and_persists() {
         persisted_tour(&temp).chapters[0].stops[0].status,
         StopStatus::Explained
     );
+}
+
+#[tokio::test]
+async fn resume_skips_explained_stops_and_restores_position() {
+    let temp = TempDir::new();
+    temp.write("src/main.rs", "fn main() {}\nfn helper() {}\n");
+    let server = MockServer::start().await;
+    let config = config_for(&temp, &server);
+    let skeleton = skeleton(
+        &[(SYMBOL, "main", 1), (SYMBOL_TWO, "helper", 2)],
+        "src/main.rs",
+    );
+    let model = model(&[SYMBOL, SYMBOL_TWO], "src/main.rs");
+    let tour = tour(vec![
+        stop("stop-1", SYMBOL, "src/main.rs", 1, 1),
+        stop("stop-2", SYMBOL_TWO, "src/main.rs", 2, 2),
+    ]);
+
+    temp.write(
+        ".laudit/skeleton.json",
+        &serde_json::to_string_pretty(&skeleton).expect("serialize skeleton"),
+    );
+    temp.write(
+        ".laudit/model.json",
+        &serde_json::to_string_pretty(&model).expect("serialize model"),
+    );
+    temp.write(
+        ".laudit/tours/tour-test.json",
+        &serde_json::to_string_pretty(&tour).expect("serialize tour"),
+    );
+
+    mount_stream(&server, sse_body(&["TITLE: Entry\nWHY: Why.\n---\nBody."])).await;
+
+    let client = client(&server);
+    let mut sink = CollectingSink::default();
+    let first = narrate_from_artifacts(temp.path(), &config, "tour-test", &client, &mut sink)
+        .await
+        .expect("first narration");
+    assert_eq!(first.narrated, 2);
+    assert_eq!(first.cached, 0);
+    let requests_after_first = server.received_requests().await.expect("requests").len();
+    assert_eq!(requests_after_first, 2);
+
+    laudit_core::cache::set_position(
+        temp.path(),
+        "tour-test",
+        Position {
+            chapter: 0,
+            stop: 1,
+        },
+    )
+    .expect("set position");
+
+    let mut sink = CollectingSink::default();
+    let resumed = resume_from_artifacts(temp.path(), &config, "tour-test", &client, &mut sink)
+        .await
+        .expect("resume");
+
+    assert_eq!(resumed.narrated, 0);
+    assert_eq!(resumed.cached, 2);
+    assert!(resumed.invalidated.is_empty());
+    assert!(resumed.skipped.is_empty());
+    let requests_after_resume = server.received_requests().await.expect("requests").len();
+    assert_eq!(
+        requests_after_resume, requests_after_first,
+        "resume should not call the LLM for explained stops"
+    );
+
+    let persisted = persisted_tour(&temp);
+    assert_eq!(
+        persisted.position,
+        Position {
+            chapter: 0,
+            stop: 1
+        }
+    );
+    assert_eq!(persisted.chapters[0].stops[0].status, StopStatus::Explained);
+    assert_eq!(persisted.chapters[0].stops[1].status, StopStatus::Explained);
+    assert_eq!(persisted.chapters[0].stops[0].explanation, "Body.");
+    assert_eq!(persisted.chapters[0].stops[1].explanation, "Body.");
+}
+
+#[tokio::test]
+async fn editing_one_stop_file_invalidates_only_that_stop() {
+    let temp = TempDir::new();
+    temp.write("src/main.rs", "fn main() {}\n");
+    temp.write("src/lib.rs", "fn helper() {}\n");
+    let server = MockServer::start().await;
+    let config = config_for(&temp, &server);
+    let skeleton = skeleton_files(&[
+        ("src/main.rs", &[(SYMBOL, "main", 1)]),
+        ("src/lib.rs", &[(SYMBOL_TWO, "helper", 1)]),
+    ]);
+    let model = model_files(&[("src/main.rs", &[SYMBOL]), ("src/lib.rs", &[SYMBOL_TWO])]);
+    let tour = tour(vec![
+        stop("stop-1", SYMBOL, "src/main.rs", 1, 1),
+        stop("stop-2", SYMBOL_TWO, "src/lib.rs", 1, 1),
+    ]);
+
+    temp.write(
+        ".laudit/skeleton.json",
+        &serde_json::to_string_pretty(&skeleton).expect("serialize skeleton"),
+    );
+    temp.write(
+        ".laudit/model.json",
+        &serde_json::to_string_pretty(&model).expect("serialize model"),
+    );
+    temp.write(
+        ".laudit/tours/tour-test.json",
+        &serde_json::to_string_pretty(&tour).expect("serialize tour"),
+    );
+
+    mount_stream(&server, sse_body(&["TITLE: Entry\nWHY: Why.\n---\nBody."])).await;
+
+    let client = client(&server);
+    let mut sink = CollectingSink::default();
+    let first = narrate_from_artifacts(temp.path(), &config, "tour-test", &client, &mut sink)
+        .await
+        .expect("first narration");
+    assert_eq!(first.narrated, 2);
+    let requests_after_first = server.received_requests().await.expect("requests").len();
+    assert_eq!(requests_after_first, 2);
+
+    let before = persisted_tour(&temp);
+    let first_hash = before.chapters[0].stops[0].file_hash.clone();
+    let second_hash = before.chapters[0].stops[1].file_hash.clone();
+    assert!(!first_hash.is_empty());
+    assert!(!second_hash.is_empty());
+
+    temp.write("src/lib.rs", "fn helper() {}\nfn extra() {}\n");
+
+    let mut sink = CollectingSink::default();
+    let resumed = resume_from_artifacts(temp.path(), &config, "tour-test", &client, &mut sink)
+        .await
+        .expect("resume");
+
+    assert_eq!(resumed.invalidated, vec!["stop-2"]);
+    assert_eq!(resumed.narrated, 1);
+    assert_eq!(resumed.cached, 1);
+    let requests_after_resume = server.received_requests().await.expect("requests").len();
+    assert_eq!(
+        requests_after_resume,
+        requests_after_first + 1,
+        "only the changed stop should be re-narrated"
+    );
+
+    let after = persisted_tour(&temp);
+    assert_eq!(after.chapters[0].stops[0].status, StopStatus::Explained);
+    assert_eq!(after.chapters[0].stops[1].status, StopStatus::Explained);
+    assert_eq!(after.chapters[0].stops[0].file_hash, first_hash);
+    assert_ne!(after.chapters[0].stops[1].file_hash, second_hash);
 }

@@ -89,6 +89,7 @@ choice (D16). The engine never requires them to be committed.
           "why_here": "…",
           "explanation": "…markdown…",
           "refs": ["sym-…"],
+          "file_hash": "fnv1a128:…", // content hash when narrated; used to invalidate
           "status": "explained"   // pending | streaming | explained | skipped | failed
         }
       ]
@@ -96,6 +97,15 @@ choice (D16). The engine never requires them to be committed.
   ]
 }
 ```
+
+### Resume and invalidation
+
+`position` and each stop's `status` are persisted so a tour can resume after a
+restart (D25). On resume, stops with `status: "explained"` are reused without
+calling the LLM. Each explained stop records the `file_hash` of the file it was
+narrated from; if the file's content hash changes, only that stop is reset to
+`pending` (its explanation and refs are cleared) and narrated again. Stops left
+in `streaming` by an interrupted run are reset to `pending`.
 
 ## `redactions.json` — placeholder map
 
