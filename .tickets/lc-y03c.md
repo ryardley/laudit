@@ -1,6 +1,6 @@
 ---
 id: lc-y03c
-status: open
+status: closed
 deps: [lc-g6vg]
 links: []
 created: 2026-11-12T09:02:36Z

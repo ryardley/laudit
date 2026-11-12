@@ -40,8 +40,8 @@ Cargo workspace at the repository root.
 
 | Crate | Kind | Responsibility |
 |---|---|---|
-| `crates/laudit-core` | lib | All engine logic: recon, graph, redaction, config, artifacts, LLM client, comprehension, plan, narration, cache, explain, print, export, status, RPC server. |
-| `crates/laudit-cli` | bin `laudit` | CLI surface: `build`, `serve`, `explain`, `tour`, `export`, `mcp`, `status`, `prompts` (plus reserved `ask`, `outline`, `clear`). |
+| `crates/laudit-core` | lib | All engine logic: recon, graph, redaction, config, artifacts, LLM client, comprehension, plan, narration, cache, explain, ask, print, export, status, RPC server. |
+| `crates/laudit-cli` | bin `laudit` | CLI surface: `build`, `serve`, `explain`, `ask`, `tour`, `export`, `mcp`, `status`, `prompts` (plus reserved `outline`, `clear`). |
 | `crates/laudit-tui` | bin/lib | Interactive terminal tour (ratatui + crossterm). Added by the TUI ticket. |
 | `crates/laudit-mcp` | bin/lib | MCP stdio server exposing engine tools to AI agents. Added by the MCP ticket. |
 
@@ -119,13 +119,16 @@ skip + warn and mark the stop. Persist prose into the tour artifact.
 | `narration` | Stage 3. |
 | `cache` | Per-stop content hashes, invalidation, resume position. |
 | `explain` | Single-symbol grounded explanation. |
+| `ask` | Grounded Q&A: deterministic retrieval, redacted context, streamed answer with `file:line` citations. |
 | `print` | Pipe-friendly tour rendering. |
 | `export` | Markdown and HTML rendering. |
 | `status` | Read-only model/tour presence and stop counts. |
 | `source` | Change-based source adapters (uncommitted, commit range). |
 | `rpc` | JSON-RPC 2.0 stdio server. |
 
-Grounded Q&A (`ask`) is a planned module; it is not part of the current engine.
+Grounded Q&A (`ask`) retrieves relevant symbols from the skeleton, model, and
+index, assembles a redacted context, and streams an answer that cites
+`file:line`. When retrieval finds no evidence it says so instead of guessing.
 
 ## Artifacts
 

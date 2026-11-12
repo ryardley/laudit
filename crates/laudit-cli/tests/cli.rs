@@ -1,5 +1,6 @@
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -102,7 +103,7 @@ fn unknown_flags_are_rejected() {
 
 #[test]
 fn stubs_parse_documented_flags_and_exit_non_zero() {
-    let cases: &[&[&str]] = &[&["ask", "what does this do?"], &["outline"], &["clear"]];
+    let cases: &[&[&str]] = &[&["outline"], &["clear"]];
 
     for args in cases {
         let output = laudit(args);
@@ -828,6 +829,172 @@ fn explain_unknown_symbol_fails() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("no symbol matches"), "got: {stderr}");
+}
+
+#[tokio::test]
+async fn ask_answers_with_mock_llm_and_cites_file_line() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let server = MockServer::start().await;
+    mount_narration(
+        &server,
+        sse_body(&["The `hub` function is defined at src/hub.rs:1."]),
+    )
+    .await;
+    write_provider_config(temp.path(), &server);
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["ask", "where is hub defined?", "--repo", &repo],
+    );
+    assert!(
+        output.status.success(),
+        "ask failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("src/hub.rs:1"), "got: {stdout}");
+}
+
+#[tokio::test]
+async fn ask_redacts_secrets_before_sending() {
+    const SECRET: &str = "AKIAIOSFODNN7EXAMPLE";
+
+    let temp = TempDir::new();
+    fs::create_dir_all(temp.path().join("src")).expect("create src");
+    fs::write(
+        temp.path().join("src/main.rs"),
+        format!("const AWS_KEY: &str = \"{SECRET}\";\nfn main() {{}}\n"),
+    )
+    .expect("write main");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let server = MockServer::start().await;
+    mount_narration(&server, sse_body(&["The key is at src/main.rs:1."])).await;
+    write_provider_config(temp.path(), &server);
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["ask", "where is the AWS key?", "--repo", &repo],
+    );
+    assert!(
+        output.status.success(),
+        "ask failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let requests = server.received_requests().await.expect("requests");
+    assert_eq!(requests.len(), 1);
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(!body.contains(SECRET), "secret reached the LLM: {body}");
+    assert!(body.contains("«aws_key#1»"), "missing placeholder: {body}");
+}
+
+#[tokio::test]
+async fn ask_repl_answers_multiple_questions() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let server = MockServer::start().await;
+    mount_narration(
+        &server,
+        sse_body(&["The `hub` function is defined at src/hub.rs:1."]),
+    )
+    .await;
+    write_provider_config(temp.path(), &server);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_laudit"))
+        .env("XDG_CONFIG_HOME", &config_dir)
+        .args(["ask", "--repo", &repo])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn laudit ask");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        stdin
+            .write_all(b"where is hub defined?\nwhere is hub used?\nexit\n")
+            .expect("write questions");
+    }
+    let output = child.wait_with_output().expect("wait for laudit ask");
+    assert!(
+        output.status.success(),
+        "ask repl failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.matches("src/hub.rs:1").count(),
+        2,
+        "expected two answers: {stdout}"
+    );
+}
+
+#[tokio::test]
+async fn ask_unknown_question_says_it_does_not_know() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let server = MockServer::start().await;
+    mount_narration(&server, sse_body(&["unused"])).await;
+    write_provider_config(temp.path(), &server);
+
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &["ask", "quantum chromodynamics", "--repo", &repo],
+    );
+    assert!(
+        output.status.success(),
+        "ask failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("don't know"), "got: {stdout}");
+    assert!(
+        server
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty(),
+        "the LLM should not be called without evidence"
+    );
 }
 
 #[test]

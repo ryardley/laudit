@@ -136,6 +136,7 @@ Actions example and the `LAUDIT_API_KEY` fallback behavior.
 | `laudit build [--offline] [--check] [--quiet] [--include-tests] [--skip-config]` | Run recon (+ comprehension/plan unless `--offline`). `--check` exits non-zero if artifacts are stale. |
 | `laudit tour [--print \| --md [--out <path>]] [--uncommitted \| --range <base..head> [--per-commit]]` | Run the interactive TUI, print the tour with `--print`, or render markdown with `--md`. Source flags tour uncommitted changes or a commit range. |
 | `laudit explain <symbol>` | Print a grounded explanation for one symbol. |
+| `laudit ask [<question>]` | Answer a grounded question with `file:line` citations; starts a REPL when the question is omitted. |
 | `laudit export --md [--out <path>]` | Render the tour to markdown. |
 | `laudit export --html [--out <dir\|file>]` | Render the tour to a self-contained HTML document. |
 | `laudit status [--tour <id>]` | Report model/tour presence and per-status stop counts. |
@@ -146,8 +147,8 @@ Actions example and the `LAUDIT_API_KEY` fallback behavior.
 Global flags: `--repo <path>`, `--offline`, `--json`, `--color auto|always|never`,
 `--version`, `--help`.
 
-`laudit ask`, `laudit outline`, and `laudit clear` are reserved commands that
-currently exit with "not implemented yet".
+`laudit outline` and `laudit clear` are reserved commands that currently exit
+with "not implemented yet".
 
 ## Neovim keymaps
 

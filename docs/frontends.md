@@ -10,6 +10,7 @@ All frontends are thin layers over `laudit-core`. The engine is CLI-first (D23).
 | `laudit serve` | Start the JSON-RPC 2.0 stdio server (see `docs/protocol.md`). |
 | `laudit tour [--print \| --md [--out <path>]] [--uncommitted \| --range <base..head> [--per-commit]]` | Run the interactive TUI, print the tour with `--print`, or render markdown with `--md`. Source flags tour uncommitted changes or a commit range. |
 | `laudit explain <symbol>` | Print a grounded explanation for one symbol. |
+| `laudit ask [<question>]` | Answer a grounded question with `file:line` citations; starts a REPL when the question is omitted. |
 | `laudit export --md [--out <path>]` | Render a tour to markdown. |
 | `laudit export --html [--out <dir\|file>]` | Render a tour to a self-contained HTML document. |
 | `laudit mcp` | Start the MCP stdio server. |
@@ -19,9 +20,16 @@ All frontends are thin layers over `laudit-core`. The engine is CLI-first (D23).
 Global flags: `--repo <path>`, `--offline`, `--json`, `--color`, `--version`,
 `--help`.
 
-Reserved but not yet implemented: `laudit ask`, `laudit outline`, and
-`laudit clear`. They parse their documented flags and exit non-zero with
-"not implemented yet".
+Reserved but not yet implemented: `laudit outline` and `laudit clear`. They
+parse their documented flags and exit non-zero with "not implemented yet".
+
+### `laudit ask`
+
+`laudit ask "<question>"` retrieves the most relevant symbols from the
+skeleton, codebase model, and index, assembles a redacted context, and streams
+an answer that cites `file:line`. With no question it starts a REPL; `exit`,
+`quit`, `:q`, or EOF ends it. `--offline` prints the retrieved symbols without
+calling the model.
 
 ## Terminal TUI (`laudit tour`)
 

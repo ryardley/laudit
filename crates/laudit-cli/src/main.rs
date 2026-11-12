@@ -1,4 +1,4 @@
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -169,7 +169,7 @@ fn main() -> ExitCode {
         Some(Command::Tour(args)) => run_tour(cli.repo, cli.offline, cli.color, args),
         Some(Command::Explain { symbol }) => run_explain(cli.repo, cli.offline, cli.color, &symbol),
         Some(Command::Export(args)) => run_export(cli.repo, args),
-        Some(Command::Ask { question }) => not_implemented("ask", &question),
+        Some(Command::Ask { question }) => run_ask(cli.repo, cli.offline, cli.json, question),
         Some(Command::Mcp) => {
             report_prompt_install();
             match laudit_mcp::run() {
@@ -882,6 +882,283 @@ fn run_explain(repo: Option<PathBuf>, offline: bool, color: ColorChoice, symbol:
             eprintln!("laudit explain: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn run_ask(repo: Option<PathBuf>, offline: bool, json: bool, question: Option<String>) -> ExitCode {
+    let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
+
+    if offline {
+        return run_ask_offline(&repo_root, question);
+    }
+
+    report_prompt_install();
+    let config = match laudit_core::config::Config::load(&repo_root) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("laudit ask: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let client = match laudit_core::llm::LlmClient::from_config(&config) {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("laudit ask: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let skeleton = match laudit_core::explain::load_skeleton(&repo_root, &config) {
+        Ok(skeleton) => skeleton,
+        Err(error) => {
+            eprintln!("laudit ask: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let model = match laudit_core::explain::load_model(&repo_root) {
+        Ok(model) => model,
+        Err(error) => {
+            eprintln!("laudit ask: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("laudit ask: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let session = AskSession {
+        runtime: &runtime,
+        repo_root: &repo_root,
+        config: &config,
+        skeleton: &skeleton,
+        model: &model,
+        client: &client,
+        json,
+    };
+
+    match question {
+        Some(question) => match ask_question(&session, &question) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("laudit ask: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        None => run_ask_repl(&session),
+    }
+}
+
+struct AskSession<'a> {
+    runtime: &'a tokio::runtime::Runtime,
+    repo_root: &'a Path,
+    config: &'a laudit_core::config::Config,
+    skeleton: &'a laudit_core::model::Skeleton,
+    model: &'a laudit_core::model::CodebaseModel,
+    client: &'a laudit_core::llm::LlmClient,
+    json: bool,
+}
+
+fn ask_question(
+    session: &AskSession<'_>,
+    question: &str,
+) -> Result<(), laudit_core::ask::AskError> {
+    let report = if session.json {
+        let mut sink = laudit_core::ask::NoopAskSink;
+        session.runtime.block_on(laudit_core::ask::ask(
+            session.repo_root,
+            session.config,
+            session.skeleton,
+            session.model,
+            question,
+            session.client,
+            &mut sink,
+        ))?
+    } else {
+        let mut sink = StdoutAskSink;
+        session.runtime.block_on(laudit_core::ask::ask(
+            session.repo_root,
+            session.config,
+            session.skeleton,
+            session.model,
+            question,
+            session.client,
+            &mut sink,
+        ))?
+    };
+
+    for warning in &report.warnings {
+        eprintln!("laudit: warning: {warning}");
+    }
+
+    if session.json {
+        match serde_json::to_string_pretty(&report) {
+            Ok(rendered) => println!("{rendered}"),
+            Err(error) => eprintln!("laudit ask: {error}"),
+        }
+        return Ok(());
+    }
+
+    if !report.answer.ends_with('\n') {
+        println!();
+    }
+    if report.citations.is_empty() && !answer_is_unknown(&report.answer) {
+        println!();
+        println!("Sources:");
+        for symbol in &report.retrieved {
+            println!("  {}:{}", symbol.file, symbol.line);
+        }
+    }
+    Ok(())
+}
+
+fn run_ask_repl(session: &AskSession<'_>) -> ExitCode {
+    let stdin = std::io::stdin();
+    let interactive = stdin.is_terminal();
+    let mut line = String::new();
+    loop {
+        if interactive {
+            print!("laudit ask> ");
+            let _ = std::io::stdout().flush();
+        }
+        line.clear();
+        match stdin.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_) => {
+                let question = line.trim();
+                if question.is_empty() {
+                    continue;
+                }
+                if matches!(question, "exit" | "quit" | ":q" | "q") {
+                    break;
+                }
+                if let Err(error) = ask_question(session, question) {
+                    eprintln!("laudit ask: {error}");
+                }
+            }
+            Err(error) => {
+                eprintln!("laudit ask: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+fn run_ask_offline(repo_root: &Path, question: Option<String>) -> ExitCode {
+    let config = match laudit_core::config::Config::load_offline(repo_root) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("laudit ask: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let skeleton = match laudit_core::explain::load_skeleton(repo_root, &config) {
+        Ok(skeleton) => skeleton,
+        Err(error) => {
+            eprintln!("laudit ask: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let model = match laudit_core::explain::load_model(repo_root) {
+        Ok(model) => model,
+        Err(error) => {
+            eprintln!("laudit ask: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let index = laudit_core::recon::load_index(repo_root).ok().flatten();
+    let options = laudit_core::ask::AskOptions::default();
+    let ask = |question: &str| {
+        let retrieved = laudit_core::ask::retrieve(
+            repo_root,
+            &skeleton,
+            &model,
+            index.as_ref(),
+            question,
+            &options,
+        );
+        print_retrieved(&retrieved);
+    };
+
+    match question {
+        Some(question) => {
+            ask(&question);
+            ExitCode::SUCCESS
+        }
+        None => {
+            let stdin = std::io::stdin();
+            let interactive = stdin.is_terminal();
+            let mut line = String::new();
+            loop {
+                if interactive {
+                    print!("laudit ask> ");
+                    let _ = std::io::stdout().flush();
+                }
+                line.clear();
+                match stdin.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let question = line.trim();
+                        if question.is_empty() {
+                            continue;
+                        }
+                        if matches!(question, "exit" | "quit" | ":q" | "q") {
+                            break;
+                        }
+                        ask(question);
+                    }
+                    Err(error) => {
+                        eprintln!("laudit ask: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+fn print_retrieved(retrieved: &[laudit_core::ask::RetrievedSymbol]) {
+    if retrieved.is_empty() {
+        println!("I don't know — no relevant symbols were found.");
+        return;
+    }
+    println!("Relevant symbols:");
+    for symbol in retrieved {
+        println!(
+            "  {}:{}  {} ({:.2})",
+            symbol.file, symbol.line, symbol.name, symbol.score
+        );
+    }
+}
+
+fn answer_is_unknown(answer: &str) -> bool {
+    let lower = answer.to_lowercase();
+    [
+        "don't know",
+        "do not know",
+        "not enough",
+        "insufficient",
+        "cannot answer",
+        "can't answer",
+        "no evidence",
+    ]
+    .iter()
+    .any(|phrase| lower.contains(phrase))
+}
+
+struct StdoutAskSink;
+
+impl laudit_core::ask::AskSink for StdoutAskSink {
+    fn on_chunk(&mut self, delta: &str) {
+        print!("{delta}");
+        let _ = std::io::stdout().flush();
     }
 }
 
