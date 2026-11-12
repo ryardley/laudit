@@ -22,6 +22,7 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
+        "ref": "refs/heads/master",
         "type": "git",
         "url": "file:."
       },
