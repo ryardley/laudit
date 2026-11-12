@@ -89,9 +89,11 @@ shipped `.laudit/.gitignore`. Whether to commit the rest is the team's choice.
 
 ## D17 — Config: global + per-repo, single provider, explicit model
 Global `~/.config/laudit/config.toml`; per-repo `.laudit/config.toml`. Key
-resolution: env → user config → repo config (env wins). One provider for now;
-profiles later. `model` is required; no hidden default. Local endpoints need no
-key.
+resolution: env → user config (env wins). Keys are never read from the repo
+config; `provider.api_key` there is rejected so secrets cannot be committed.
+One provider for now; profiles later. `model` is required; no hidden default.
+Local endpoints need no key. `laudit build` installs a default global config on
+first run and never overwrites an existing file.
 
 ## D18 — Prompts are embedded, installed on first run, versioned
 Defaults are embedded in the binary and installed to `~/.config/laudit/prompts/`

@@ -5,9 +5,15 @@
 - **Global:** `~/.config/laudit/config.toml`
 - **Per-repo:** `<repo>/.laudit/config.toml`
 
+`laudit build` installs a default global config on first run if the file is
+missing. Existing files are never overwritten.
+
 Per-repo values override global values for the same key. The Neovim `setup{}`
 holds **only UI options** (split side/size, keymap enable, binary path); it does
 not configure the engine.
+
+API keys belong in the global config or the environment, never in the repo. A
+`provider.api_key` in `<repo>/.laudit/config.toml` is rejected at load time.
 
 ## Schema
 
@@ -21,7 +27,7 @@ excludes = ["vendor/", "dist/"]           # in addition to .gitignore
 base_url = "https://api.openai.com/v1"   # any OpenAI-compatible endpoint
 model = "gpt-4o-mini"                     # REQUIRED, no hidden default
 api_key_env = "OPENAI_API_KEY"            # optional indirection
-api_key = "sk-..."                        # optional stored key (prefer env)
+api_key = "sk-..."                        # global config only; rejected in repo config
 
 [redaction]
 extra_rules = []                          # additional regexes
@@ -43,7 +49,10 @@ Order, first match wins:
 
 1. Environment: the variable named by `provider.api_key_env`, else `LAUDIT_API_KEY`.
 2. Global config (if a key is stored there).
-3. Per-repo config.
+
+The per-repo config is never consulted for keys. Setting `provider.api_key` in
+`<repo>/.laudit/config.toml` is an error, so a key cannot be committed by
+accident.
 
 `model` is required for LLM-backed commands; a missing model is a clear error.
 Local endpoints (`localhost`/`127.0.0.1`/`::1`/`0.0.0.0`) require no key.

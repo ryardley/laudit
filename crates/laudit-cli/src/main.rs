@@ -198,6 +198,8 @@ fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) 
         return run_build_check(&repo_root, json, args.quiet);
     }
 
+    report_config_install();
+
     if offline {
         let config = match laudit_core::config::Config::load_offline(&repo_root) {
             Ok(config) => config,
@@ -1346,6 +1348,16 @@ fn print_build_summary(report: &laudit_core::build::BuildReport) {
     println!("  index:       {}", report.index_path.display());
     println!("  skeleton:    {}", report.skeleton_path.display());
     println!("  model:       {}", report.model_path.display());
+}
+
+fn report_config_install() {
+    match laudit_core::config::ensure_installed() {
+        Ok(report) if report.installed => {
+            eprintln!("laudit: installed config at {}", report.path.display());
+        }
+        Ok(_) => {}
+        Err(error) => eprintln!("laudit: warning: could not install config: {error}"),
+    }
 }
 
 fn report_prompt_install() {

@@ -99,7 +99,6 @@ pub struct Config {
     /// Budget settings.
     pub budgets: Budgets,
     global_api_key: Option<String>,
-    repo_api_key: Option<String>,
 }
 
 impl Config {
@@ -209,7 +208,9 @@ impl Config {
             non_empty(repo_provider.api_key_env).or_else(|| non_empty(global_provider.api_key_env));
 
         let global_api_key = non_empty(global_provider.api_key);
-        let repo_api_key = non_empty(repo_provider.api_key);
+        if non_empty(repo_provider.api_key).is_some() {
+            return Err(ConfigError::ApiKeyInRepoConfig);
+        }
 
         let roots = repo_roots.or(global_roots).unwrap_or_else(|| {
             DEFAULT_ROOTS
@@ -263,7 +264,6 @@ impl Config {
             redaction,
             budgets,
             global_api_key,
-            repo_api_key,
         })
     }
 
@@ -286,7 +286,9 @@ impl Config {
     /// 1. the environment variable named by `provider.api_key_env`
     /// 2. `LAUDIT_API_KEY`
     /// 3. the global config
-    /// 4. the per-repo config
+    ///
+    /// Keys are never read from the per-repo config; a key there is rejected
+    /// when the config is loaded.
     #[must_use]
     pub fn api_key(&self) -> Option<String> {
         if let Some(name) = &self.provider.api_key_env {
@@ -297,9 +299,7 @@ impl Config {
         if let Some(value) = env_value(API_KEY_ENV) {
             return Some(value);
         }
-        self.global_api_key
-            .clone()
-            .or_else(|| self.repo_api_key.clone())
+        self.global_api_key.clone()
     }
 
     /// Resolve the API key, allowing local endpoints to have none.
@@ -361,6 +361,70 @@ pub fn global_config_path() -> Option<PathBuf> {
 #[must_use]
 pub fn repo_config_path(repo_root: impl AsRef<Path>) -> PathBuf {
     repo_root.as_ref().join(".laudit").join("config.toml")
+}
+
+/// Default global config installed on first `laudit build`.
+pub const DEFAULT_CONFIG: &str = r#"# laudit global configuration.
+# Provider settings and API keys live here, never in the repo.
+
+[provider]
+# Any OpenAI-compatible endpoint.
+base_url = "https://api.openai.com/v1"
+# Required for LLM-backed commands. Uncomment and set a model.
+# model = "gpt-4o-mini"
+# Environment variable that holds the API key.
+api_key_env = "OPENAI_API_KEY"
+# Or store the key here (prefer the environment).
+# api_key = "sk-..."
+
+[redaction]
+extra_rules = []
+allowlist = []
+
+[budgets]
+max_stops_per_chapter = 12
+max_context_tokens = 12000
+"#;
+
+/// Result of ensuring the global config is installed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallReport {
+    /// Path to the global config.
+    pub path: PathBuf,
+    /// Whether this call created the file.
+    pub installed: bool,
+}
+
+/// Install the default global config if it does not exist.
+pub fn ensure_installed() -> Result<InstallReport, ConfigError> {
+    let path = global_config_path().ok_or(ConfigError::NoConfigDir)?;
+    ensure_installed_at(&path)
+}
+
+/// Install the default config at `path` if it does not exist.
+///
+/// Existing files are never overwritten.
+pub fn ensure_installed_at(path: &Path) -> Result<InstallReport, ConfigError> {
+    if path.exists() {
+        return Ok(InstallReport {
+            path: path.to_path_buf(),
+            installed: false,
+        });
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| ConfigError::Write {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    fs::write(path, DEFAULT_CONFIG).map_err(|source| ConfigError::Write {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(InstallReport {
+        path: path.to_path_buf(),
+        installed: true,
+    })
 }
 
 /// Whether `url` points at a local endpoint.
@@ -458,8 +522,19 @@ pub enum ConfigError {
         /// Underlying parse error.
         source: toml::de::Error,
     },
+    /// A config file could not be written.
+    Write {
+        /// Path that failed.
+        path: PathBuf,
+        /// Underlying I/O error.
+        source: io::Error,
+    },
+    /// No home or config directory could be determined.
+    NoConfigDir,
     /// `provider.model` was not configured.
     MissingModel,
+    /// `provider.api_key` was set in the per-repo config.
+    ApiKeyInRepoConfig,
     /// A remote endpoint was configured without an API key.
     MissingApiKey {
         /// The endpoint that needs a key.
@@ -476,9 +551,20 @@ impl fmt::Display for ConfigError {
             Self::Parse { path, source } => {
                 write!(f, "failed to parse config {}: {source}", path.display())
             }
+            Self::Write { path, source } => {
+                write!(f, "failed to write config {}: {source}", path.display())
+            }
+            Self::NoConfigDir => write!(
+                f,
+                "could not determine a config directory; set HOME or XDG_CONFIG_HOME"
+            ),
             Self::MissingModel => write!(
                 f,
                 "provider.model is required; set it in ~/.config/laudit/config.toml or .laudit/config.toml"
+            ),
+            Self::ApiKeyInRepoConfig => write!(
+                f,
+                "provider.api_key must not be set in .laudit/config.toml; move it to ~/.config/laudit/config.toml or use an environment variable"
             ),
             Self::MissingApiKey { base_url } => write!(
                 f,
@@ -493,7 +579,11 @@ impl std::error::Error for ConfigError {
         match self {
             Self::Read { source, .. } => Some(source),
             Self::Parse { source, .. } => Some(source),
-            Self::MissingModel | Self::MissingApiKey { .. } => None,
+            Self::Write { source, .. } => Some(source),
+            Self::NoConfigDir
+            | Self::MissingModel
+            | Self::ApiKeyInRepoConfig
+            | Self::MissingApiKey { .. } => None,
         }
     }
 }
@@ -626,13 +716,13 @@ mod tests {
     }
 
     #[test]
-    fn api_key_prefers_environment_then_global_then_repo() {
+    fn api_key_prefers_environment_then_global() {
         let _lock = ENV_LOCK.lock().expect("env lock");
         let _laudit = EnvGuard::remove(API_KEY_ENV);
         let _custom = EnvGuard::remove("LAUDIT_TEST_KEY");
 
         let global = "[provider]\nmodel = \"m\"\napi_key = \"global-key\"\napi_key_env = \"LAUDIT_TEST_KEY\"\n";
-        let repo = "[provider]\napi_key = \"repo-key\"\n";
+        let repo = "[provider]\n";
 
         let config = config_with(global, repo);
         assert_eq!(config.api_key().as_deref(), Some("global-key"));
@@ -653,7 +743,7 @@ mod tests {
         let _custom = EnvGuard::remove("LAUDIT_TEST_KEY");
 
         let global = "[provider]\nmodel = \"m\"\napi_key = \"global-key\"\napi_key_env = \"LAUDIT_TEST_KEY\"\n";
-        let repo = "[provider]\napi_key = \"repo-key\"\n";
+        let repo = "[provider]\n";
 
         let _laudit = EnvGuard::set(API_KEY_ENV, "laudit-env-key");
         let config = config_with(global, repo);
@@ -661,15 +751,14 @@ mod tests {
     }
 
     #[test]
-    fn repo_key_is_used_when_global_has_none() {
-        let _lock = ENV_LOCK.lock().expect("env lock");
-        let _laudit = EnvGuard::remove(API_KEY_ENV);
+    fn repo_api_key_is_rejected() {
+        let dir = TempDir::new();
+        let global = dir.write("global.toml", "[provider]\nmodel = \"m\"\n");
+        let repo = dir.write("repo.toml", "[provider]\napi_key = \"repo-key\"\n");
 
-        let config = config_with(
-            "[provider]\nmodel = \"m\"\n",
-            "[provider]\napi_key = \"repo-key\"\n",
-        );
-        assert_eq!(config.api_key().as_deref(), Some("repo-key"));
+        let error = Config::load_from(Some(&global), Some(&repo)).expect_err("repo key");
+        assert!(matches!(error, ConfigError::ApiKeyInRepoConfig));
+        assert!(error.to_string().contains(".laudit/config.toml"));
     }
 
     #[test]
@@ -796,5 +885,42 @@ mod tests {
         let config = Config::load(&dir.path).expect("load config");
         assert_eq!(config.model(), "repo-model");
         assert_eq!(repo, repo_config_path(&dir.path));
+    }
+
+    #[test]
+    fn install_writes_default_config_once() {
+        let dir = TempDir::new();
+        let path = dir.path.join("laudit/config.toml");
+
+        let report = ensure_installed_at(&path).expect("install");
+        assert!(report.installed);
+        assert_eq!(report.path, path);
+        let contents = fs::read_to_string(&path).expect("read config");
+        assert!(contents.contains("[provider]"));
+
+        let report = ensure_installed_at(&path).expect("install again");
+        assert!(!report.installed);
+    }
+
+    #[test]
+    fn install_does_not_overwrite_existing_config() {
+        let dir = TempDir::new();
+        let path = dir.write("config.toml", "[provider]\nmodel = \"custom\"\n");
+
+        let report = ensure_installed_at(&path).expect("install");
+        assert!(!report.installed);
+        assert_eq!(
+            fs::read_to_string(&path).expect("read config"),
+            "[provider]\nmodel = \"custom\"\n"
+        );
+    }
+
+    #[test]
+    fn default_config_is_valid_toml() {
+        let dir = TempDir::new();
+        let path = dir.write("config.toml", DEFAULT_CONFIG);
+
+        let config = Config::load_from_offline(Some(&path), None).expect("default config");
+        assert_eq!(config.model(), "offline");
     }
 }

@@ -120,7 +120,8 @@ artifacts are stale.
 
 ### With an LLM
 
-Create a global config (or a per-repo `.laudit/config.toml`):
+Create a global config. Provider settings and API keys belong here, never in
+the repo:
 
 ```sh
 mkdir -p ~/.config/laudit
@@ -133,6 +134,9 @@ EOF
 
 export OPENAI_API_KEY=sk-...
 ```
+
+Per-repo `.laudit/config.toml` is for repo-specific settings (`roots`,
+`languages`, `excludes`, budgets); a `provider.api_key` there is rejected.
 
 Then build and tour:
 
@@ -222,9 +226,13 @@ In the outline overlay: `j`/`k` move, `Enter` selects, `Esc` closes, `q` quits.
 - Global: `~/.config/laudit/config.toml` (or `$XDG_CONFIG_HOME/laudit/config.toml`)
 - Per-repo: `<repo>/.laudit/config.toml`
 
+`laudit build` installs a default global config on first run if the file is
+missing; existing files are never overwritten.
+
 Per-repo values override global values. API keys resolve from the environment
-first, then the global config, then the repo config. `model` is required for
-LLM-backed commands; local endpoints need no key. Redaction is always on.
+first, then the global config; keys are never read from the repo config.
+`model` is required for LLM-backed commands; local endpoints need no key.
+Redaction is always on.
 
 See [docs/config.md](docs/config.md) for the full schema, key resolution, and
 redaction rules.
