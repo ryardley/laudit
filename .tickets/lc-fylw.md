@@ -1,6 +1,6 @@
 ---
 id: lc-fylw
-status: open
+status: closed
 deps: [lc-ntlg]
 links: []
 created: 2026-11-12T08:57:02Z

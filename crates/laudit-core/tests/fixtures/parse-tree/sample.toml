@@ -1,0 +1,8 @@
+[package]
+name = "demo"
+version = "0.1.0"
+
+dependencies.serde = "1"
+
+[package.metadata.docs]
+features = ["derive"]
