@@ -5,7 +5,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use laudit_core::recon::git::{
-    mine_file, mine_region, Churn, LineRange, MAX_RECENT_COMMITS, MAX_SUBJECT_CHARS,
+    head, mine_file, mine_region, Churn, LineRange, MAX_RECENT_COMMITS, MAX_SUBJECT_CHARS,
 };
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
@@ -241,6 +241,17 @@ fn region_blame_is_limited_to_the_region() {
         !subjects.contains(&"add multiply helper"),
         "subjects: {subjects:?}"
     );
+}
+
+#[test]
+fn head_returns_the_current_commit_or_none() {
+    let repo = init_fixture_repo();
+    let sha = head(repo.path()).expect("head");
+    assert_eq!(sha.len(), 40);
+    assert!(sha.bytes().all(|byte| byte.is_ascii_hexdigit()));
+
+    let temp = TempDir::new();
+    assert_eq!(head(temp.path()), None);
 }
 
 #[test]

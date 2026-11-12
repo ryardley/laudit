@@ -17,7 +17,7 @@ pub mod walk;
 
 pub use entrypoints::{detect as detect_entrypoints, Entrypoint, EntrypointKind};
 pub use git::{
-    mine as mine_provenance, mine_file, mine_files, mine_region, BlameSummary, Churn,
+    head, mine as mine_provenance, mine_file, mine_files, mine_region, BlameSummary, Churn,
     CommitSummary, LineRange, Provenance,
 };
 pub use graph::{Community, FileEdge, FileNode, Graph, SymbolEdge, SymbolNode};

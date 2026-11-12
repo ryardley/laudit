@@ -1,6 +1,6 @@
 ---
 id: lc-57oh
-status: open
+status: closed
 deps: [lc-berl, lc-hl1z, lc-u1cz, lc-lu0l]
 links: []
 created: 2026-11-12T08:57:02Z

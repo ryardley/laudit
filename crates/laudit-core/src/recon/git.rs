@@ -160,6 +160,21 @@ pub fn mine(
     provenance
 }
 
+/// Return the current `HEAD` commit SHA, if `repo_root` is a git work tree.
+///
+/// Returns `None` for a non-git directory, an empty repository, or when git is
+/// unavailable.
+#[must_use]
+pub fn head(repo_root: impl AsRef<Path>) -> Option<String> {
+    let repo_root = repo_root.as_ref();
+    if !is_git_repo(repo_root) {
+        return None;
+    }
+    run_git(repo_root, &["rev-parse", "--verify", "HEAD"])
+        .map(|output| output.trim().to_owned())
+        .filter(|sha| !sha.is_empty())
+}
+
 /// Mine provenance for a whole file.
 #[must_use]
 pub fn mine_file(repo_root: impl AsRef<Path>, file: impl AsRef<Path>) -> Provenance {

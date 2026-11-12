@@ -122,6 +122,37 @@ impl Config {
         Self::load(cwd)
     }
 
+    /// Load configuration for recon-only work, where a provider model is not
+    /// required.
+    ///
+    /// This is the offline build path: roots, languages, excludes, redaction,
+    /// and budgets are still honored, but a missing `provider.model` is not an
+    /// error. The resolved model is the placeholder `offline`.
+    pub fn load_offline(repo_root: impl AsRef<Path>) -> Result<Self, ConfigError> {
+        let global = global_config_path();
+        let repo = repo_config_path(repo_root);
+        Self::load_from_offline(global.as_deref(), Some(repo.as_path()))
+    }
+
+    /// Load configuration from explicit paths without requiring a model.
+    ///
+    /// `None` means "no file at this layer". A path that does not exist is
+    /// also treated as an empty layer.
+    pub fn load_from_offline(
+        global: Option<&Path>,
+        repo: Option<&Path>,
+    ) -> Result<Self, ConfigError> {
+        let global = match global {
+            Some(path) => FileConfig::read(path)?,
+            None => FileConfig::default(),
+        };
+        let repo = match repo {
+            Some(path) => FileConfig::read(path)?,
+            None => FileConfig::default(),
+        };
+        Self::from_layers_with_model(global, repo, false)
+    }
+
     /// Load configuration from explicit paths.
     ///
     /// `None` means "no file at this layer". A path that does not exist is
@@ -139,6 +170,14 @@ impl Config {
     }
 
     fn from_layers(global: FileConfig, repo: FileConfig) -> Result<Self, ConfigError> {
+        Self::from_layers_with_model(global, repo, true)
+    }
+
+    fn from_layers_with_model(
+        global: FileConfig,
+        repo: FileConfig,
+        require_model: bool,
+    ) -> Result<Self, ConfigError> {
         let FileConfig {
             provider: global_provider,
             roots: global_roots,
@@ -164,6 +203,7 @@ impl Config {
             .unwrap_or_else(|| DEFAULT_BASE_URL.to_owned());
         let model = non_empty(repo_provider.model)
             .or_else(|| non_empty(global_provider.model))
+            .or_else(|| (!require_model).then(|| "offline".to_owned()))
             .ok_or(ConfigError::MissingModel)?;
         let api_key_env =
             non_empty(repo_provider.api_key_env).or_else(|| non_empty(global_provider.api_key_env));
@@ -548,6 +588,18 @@ mod tests {
         let error = Config::load_from(Some(&global), None).expect_err("missing model");
         assert!(matches!(error, ConfigError::MissingModel));
         assert!(error.to_string().contains("model"));
+    }
+
+    #[test]
+    fn offline_loading_does_not_require_a_model() {
+        let dir = TempDir::new();
+        let global = dir.write(
+            "global.toml",
+            "roots = [\"src\"]\n\n[provider]\nbase_url = \"http://localhost:11434/v1\"\n",
+        );
+        let config = Config::load_from_offline(Some(&global), None).expect("load offline config");
+        assert_eq!(config.model(), "offline");
+        assert_eq!(config.roots, vec!["src"]);
     }
 
     #[test]

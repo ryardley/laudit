@@ -7,8 +7,11 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+
+use crate::recon::{Community, Entrypoint, FileNode, Provenance, SymbolNode};
 
 /// Current artifact schema version.
 ///
@@ -83,6 +86,48 @@ pub struct CodebaseModel {
 }
 
 impl CodebaseModel {
+    /// Reject an artifact whose schema version this build does not understand.
+    pub fn validate_schema_version(&self) -> Result<(), SchemaVersionError> {
+        check_schema_version(self.schema_version)
+    }
+}
+
+/// The deterministic structural skeleton produced by Stage 0 recon.
+///
+/// This is the offline artifact: it contains no prose and no LLM output. It is
+/// the spine that Stage 1 comprehension narrates.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Skeleton {
+    /// Artifact schema version.
+    pub schema_version: u32,
+    /// Engine version that produced the artifact.
+    pub tool_version: String,
+    /// Stable identifier for the repository path.
+    pub repo_id: String,
+    /// Git commit the skeleton was built from, if any.
+    #[serde(default)]
+    pub head: Option<String>,
+    /// Hash of the working-tree state.
+    pub dirty_hash: String,
+    /// File nodes, sorted by path.
+    pub files: Vec<FileNode>,
+    /// Symbol nodes, sorted by file, line, then name.
+    pub symbols: Vec<SymbolNode>,
+    /// Louvain communities, exposed as subsystem candidates.
+    pub communities: Vec<Community>,
+    /// Ranked entrypoint candidates.
+    pub entrypoints: Vec<Entrypoint>,
+    /// File paths ordered by PageRank descending.
+    pub ranked_files: Vec<String>,
+    /// Symbol IDs ordered by PageRank descending.
+    pub ranked_symbols: Vec<String>,
+    /// Bounded git provenance for each file.
+    #[serde(default)]
+    pub provenance: BTreeMap<PathBuf, Provenance>,
+}
+
+impl Skeleton {
     /// Reject an artifact whose schema version this build does not understand.
     pub fn validate_schema_version(&self) -> Result<(), SchemaVersionError> {
         check_schema_version(self.schema_version)
@@ -292,6 +337,7 @@ pub struct Placeholder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recon::EntrypointKind;
     use serde_json::{json, Value};
 
     fn codebase_model() -> CodebaseModel {
@@ -379,6 +425,49 @@ mod tests {
         }
     }
 
+    fn skeleton() -> Skeleton {
+        let mut provenance = BTreeMap::new();
+        provenance.insert(
+            PathBuf::from("src/main.rs"),
+            Provenance::empty("src/main.rs", None),
+        );
+        Skeleton {
+            schema_version: SCHEMA_VERSION,
+            tool_version: "0.1.0".to_owned(),
+            repo_id: "fnv1a128:abc".to_owned(),
+            head: Some("deadbeef".to_owned()),
+            dirty_hash: "fnv1a128:def".to_owned(),
+            files: vec![FileNode {
+                path: PathBuf::from("src/main.rs"),
+                rank: 1.0,
+                community: 0,
+            }],
+            symbols: vec![SymbolNode {
+                id: "sym-1".to_owned(),
+                file: PathBuf::from("src/main.rs"),
+                name: "main".to_owned(),
+                line: 1,
+                rank: 1.0,
+                community: 0,
+            }],
+            communities: vec![Community {
+                id: 0,
+                files: vec![PathBuf::from("src/main.rs")],
+                symbols: vec!["sym-1".to_owned()],
+            }],
+            entrypoints: vec![Entrypoint {
+                file: PathBuf::from("src/main.rs"),
+                line: 1,
+                kind: EntrypointKind::RustMain,
+                reason: "Rust binary crate root (main.rs)".to_owned(),
+                score: 100,
+            }],
+            ranked_files: vec!["src/main.rs".to_owned()],
+            ranked_symbols: vec!["sym-1".to_owned()],
+            provenance,
+        }
+    }
+
     fn round_trip<T>(value: &T)
     where
         T: Serialize + for<'de> Deserialize<'de> + PartialEq + std::fmt::Debug,
@@ -391,6 +480,39 @@ mod tests {
     #[test]
     fn codebase_model_round_trips() {
         round_trip(&codebase_model());
+    }
+
+    #[test]
+    fn skeleton_round_trips() {
+        round_trip(&skeleton());
+    }
+
+    #[test]
+    fn skeleton_matches_documented_shape() {
+        let value = serde_json::to_value(skeleton()).expect("serialize");
+        let object = value.as_object().expect("object");
+        for key in [
+            "schema_version",
+            "tool_version",
+            "repo_id",
+            "head",
+            "dirty_hash",
+            "files",
+            "symbols",
+            "communities",
+            "entrypoints",
+            "ranked_files",
+            "ranked_symbols",
+            "provenance",
+        ] {
+            assert!(object.contains_key(key), "missing {key}");
+        }
+        assert_eq!(value["files"][0]["path"], json!("src/main.rs"));
+        assert_eq!(value["symbols"][0]["id"], json!("sym-1"));
+        assert_eq!(value["communities"][0]["id"], json!(0));
+        assert_eq!(value["entrypoints"][0]["kind"], json!("rust-main"));
+        assert_eq!(value["ranked_files"][0], json!("src/main.rs"));
+        assert_eq!(value["ranked_symbols"][0], json!("sym-1"));
     }
 
     #[test]

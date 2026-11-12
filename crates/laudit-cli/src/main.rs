@@ -148,7 +148,7 @@ fn main() -> ExitCode {
             }
         }
         Some(Command::Prompts(args)) => run_prompts(args),
-        Some(Command::Build(args)) => not_implemented("build", &args),
+        Some(Command::Build(args)) => run_build(cli.repo, cli.offline, cli.json, args),
         Some(Command::Tour(args)) => not_implemented("tour", &args),
         Some(Command::Explain { symbol }) => not_implemented("explain", &symbol),
         Some(Command::Export(args)) => not_implemented("export", &args),
@@ -163,6 +163,60 @@ fn main() -> ExitCode {
 fn not_implemented<T: std::fmt::Debug>(command: &str, _args: &T) -> ExitCode {
     eprintln!("laudit {command}: not implemented yet");
     ExitCode::FAILURE
+}
+
+fn run_build(repo: Option<PathBuf>, offline: bool, json: bool, args: BuildArgs) -> ExitCode {
+    if args.check {
+        return not_implemented("build --check", &args);
+    }
+    if !offline {
+        return not_implemented("build", &args);
+    }
+
+    let repo_root = repo.unwrap_or_else(|| PathBuf::from("."));
+    let config = match laudit_core::config::Config::load_offline(&repo_root) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("laudit build: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match laudit_core::build::build_offline(&repo_root, &config) {
+        Ok(report) => {
+            if json {
+                match serde_json::to_string_pretty(&report) {
+                    Ok(rendered) => println!("{rendered}"),
+                    Err(error) => {
+                        eprintln!("laudit build: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            } else if !args.quiet {
+                print_build_summary(&report);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("laudit build: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn print_build_summary(report: &laudit_core::build::BuildReport) {
+    println!("laudit build (offline)");
+    println!("  files:       {}", report.files);
+    println!("  symbols:     {}", report.symbols);
+    println!("  communities: {}", report.communities);
+    println!("  entrypoints: {}", report.entrypoints);
+    println!(
+        "  parsed:      {} (reused {})",
+        report.parsed, report.reused
+    );
+    println!("  index:       {}", report.index_path.display());
+    println!("  skeleton:    {}", report.skeleton_path.display());
+    println!("  model:       {}", report.model_path.display());
 }
 
 fn report_prompt_install() {
