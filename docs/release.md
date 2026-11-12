@@ -67,19 +67,30 @@ The resulting binary is `target/release/laudit`.
 ### Nix flake
 
 The project is also installable as a Nix flake (ticket `lc-um4w`), so users need
-no Rust toolchain:
+no Rust toolchain. From a checkout:
+
+```sh
+nix build .#laudit                           # build ./result/bin/laudit
+nix run .#laudit -- --version                # run without installing
+nix profile install .#laudit                 # install the binary
+nix develop                                  # dev shell (Rust, tk, opencode)
+```
+
+Or directly from GitHub:
 
 ```sh
 nix run github:<owner>/laudit -- --version   # run without installing
 nix profile install github:<owner>/laudit    # install the binary
 ```
 
-The flake exposes `packages.<system>.laudit` (and `default`), `apps.<system>.laudit`,
-a `devShells.<system>.default`, and optionally `packages.<system>.laudit-nvim`
-(the Lua plugin). It builds the workspace with `rustPlatform.buildRustPackage`
-and `cargoLock.lockFile = ./Cargo.lock`. `devenv.nix` remains the development
-environment; the flake is the packaging/installation path. `nix flake check`
-must pass.
+The flake exposes `packages.<system>.laudit` (and `default`), `apps.<system>.laudit`
+(and `default`), `devShells.<system>.default`, `packages.<system>.laudit-nvim`
+(the Lua plugin, installed under `$out/lua` and `$out/plugin`), and
+`overlays.default`. It supports `x86_64-linux` and `aarch64-linux`, builds the
+whole workspace with `rustPlatform.buildRustPackage`, and pins dependencies with
+`cargoLock.lockFile = ./Cargo.lock`. The binary reports the crate version
+(`laudit --version`). `devenv.nix` remains the development environment; the
+flake is the packaging/installation path. `nix flake check` must pass.
 
 ## Tooling
 

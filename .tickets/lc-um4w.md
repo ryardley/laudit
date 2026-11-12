@@ -1,6 +1,6 @@
 ---
 id: lc-um4w
-status: open
+status: closed
 deps: [lc-n5h7]
 links: []
 created: 2026-11-12T09:14:27Z
