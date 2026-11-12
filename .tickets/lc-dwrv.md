@@ -1,6 +1,6 @@
 ---
 id: lc-dwrv
-status: open
+status: closed
 deps: [lc-57oh, lc-lz7a]
 links: []
 created: 2026-11-12T08:57:02Z

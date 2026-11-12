@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use regex::Regex;
+use serde_json::Value;
 
 use crate::config::Redaction;
 use crate::model::{Placeholder, Redactions, SCHEMA_VERSION};
@@ -304,6 +305,40 @@ impl Redactor {
     #[must_use]
     pub fn placeholders(&self) -> &BTreeMap<String, Placeholder> {
         &self.placeholders
+    }
+
+    /// Recursively redact every string in a JSON value.
+    ///
+    /// Redacting the structured payload before serializing it avoids the
+    /// escaped-newline blind spot: a secret on its own line inside a JSON
+    /// string is still preceded by a real newline, so line-anchored and
+    /// word-boundary rules match. Object values whose key looks secret-bearing
+    /// are redacted as a whole, preserving the key-name-aware layer.
+    pub fn redact_value(&mut self, value: &mut Value) {
+        match value {
+            Value::String(text) => {
+                *text = self.redact(text).0;
+            }
+            Value::Array(items) => {
+                for item in items {
+                    self.redact_value(item);
+                }
+            }
+            Value::Object(map) => {
+                for (key, item) in map.iter_mut() {
+                    if is_secret_key(key) {
+                        if let Value::String(text) = item {
+                            if !should_skip(text) {
+                                *text = self.placeholder_for(text, "key_value", "", 0);
+                                continue;
+                            }
+                        }
+                    }
+                    self.redact_value(item);
+                }
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        }
     }
 
     /// Build the `redactions.json` artifact for this session.
@@ -642,6 +677,39 @@ mod tests {
         let placeholder = map.keys().next().expect("placeholder");
         assert_eq!(map[placeholder].file, "src/config.rs");
         assert_eq!(map[placeholder].line, 11);
+    }
+
+    #[test]
+    fn redact_value_catches_secrets_on_their_own_lines() {
+        let mut redactor = Redactor::default();
+        let mut value = serde_json::json!({
+            "docs": [{
+                "path": "docs/security.md",
+                "content": format!("Intro\n\n{JWT}\n\nDATABASE_PASSWORD=hunter2\n")
+            }]
+        });
+
+        redactor.redact_value(&mut value);
+
+        let json = serde_json::to_string(&value).expect("serialize");
+        assert!(!json.contains(JWT));
+        assert!(!json.contains("hunter2"));
+        assert!(json.contains("«jwt#1»"));
+        assert!(json.contains("«env_value#1»"));
+    }
+
+    #[test]
+    fn redact_value_uses_secret_bearing_keys() {
+        let mut redactor = Redactor::default();
+        let mut value = serde_json::json!({
+            "github_token": "opaque-value",
+            "name": "laudit"
+        });
+
+        redactor.redact_value(&mut value);
+
+        assert_eq!(value["github_token"], "«key_value#1»");
+        assert_eq!(value["name"], "laudit");
     }
 
     #[test]

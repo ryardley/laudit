@@ -1,0 +1,168 @@
+---
+source: crates/laudit-core/tests/golden.rs
+expression: output.tour
+---
+{
+  "chapters": [
+    {
+      "id": "on-ramp",
+      "stops": [
+        {
+          "end_line": 5,
+          "explanation": "This stop explains `sym-580374f2cb4acba9`.\n",
+          "file": "src/index.ts",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-580374f2cb4acba9",
+          "refs": [
+            "sym-580374f2cb4acba9"
+          ],
+          "start_line": 3,
+          "status": "explained",
+          "symbol_id": "sym-580374f2cb4acba9",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        }
+      ],
+      "title": "On-ramp"
+    },
+    {
+      "id": "subsystem-sub-core",
+      "stops": [
+        {
+          "end_line": 3,
+          "explanation": "This stop explains `sym-a69cbea6d5f195ee`.\n",
+          "file": "src/lib.ts",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-a69cbea6d5f195ee",
+          "refs": [
+            "sym-a69cbea6d5f195ee"
+          ],
+          "start_line": 1,
+          "status": "explained",
+          "symbol_id": "sym-a69cbea6d5f195ee",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 4,
+          "explanation": "This stop explains `sym-b7f82a0850ea8579`.\n",
+          "file": "README.md",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-b7f82a0850ea8579",
+          "refs": [
+            "sym-b7f82a0850ea8579"
+          ],
+          "start_line": 1,
+          "status": "explained",
+          "symbol_id": "sym-b7f82a0850ea8579",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 2,
+          "explanation": "This stop explains `sym-5a85c248ab3f2cce`.\n",
+          "file": "package.json",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-5a85c248ab3f2cce",
+          "refs": [
+            "sym-5a85c248ab3f2cce"
+          ],
+          "start_line": 2,
+          "status": "explained",
+          "symbol_id": "sym-5a85c248ab3f2cce",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 3,
+          "explanation": "This stop explains `sym-fbac95f484b68618`.\n",
+          "file": "package.json",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-fbac95f484b68618",
+          "refs": [
+            "sym-fbac95f484b68618"
+          ],
+          "start_line": 3,
+          "status": "explained",
+          "symbol_id": "sym-fbac95f484b68618",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 4,
+          "explanation": "This stop explains `sym-d4851cb373d58fb6`.\n",
+          "file": "package.json",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-d4851cb373d58fb6",
+          "refs": [
+            "sym-d4851cb373d58fb6"
+          ],
+          "start_line": 4,
+          "status": "explained",
+          "symbol_id": "sym-d4851cb373d58fb6",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 5,
+          "explanation": "This stop explains `sym-b4a286541b5c2e73`.\n",
+          "file": "package.json",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-b4a286541b5c2e73",
+          "refs": [
+            "sym-b4a286541b5c2e73"
+          ],
+          "start_line": 5,
+          "status": "explained",
+          "symbol_id": "sym-b4a286541b5c2e73",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 6,
+          "explanation": "This stop explains `sym-c5ec21f7746cbbd2`.\n",
+          "file": "package.json",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-c5ec21f7746cbbd2",
+          "refs": [
+            "sym-c5ec21f7746cbbd2"
+          ],
+          "start_line": 6,
+          "status": "explained",
+          "symbol_id": "sym-c5ec21f7746cbbd2",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 9,
+          "explanation": "This stop explains `sym-744998dae11130db`.\n",
+          "file": "package.json",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-744998dae11130db",
+          "refs": [
+            "sym-744998dae11130db"
+          ],
+          "start_line": 7,
+          "status": "explained",
+          "symbol_id": "sym-744998dae11130db",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        }
+      ],
+      "title": "Core"
+    }
+  ],
+  "model": "test-model",
+  "position": {
+    "chapter": 0,
+    "stop": 0
+  },
+  "prompt_version": "<prompt_version>",
+  "redaction_profile": "default",
+  "schema_version": 1,
+  "source": {
+    "kind": "codebase"
+  },
+  "tool_version": "0.1.0",
+  "tour_id": "<tour_id>"
+}

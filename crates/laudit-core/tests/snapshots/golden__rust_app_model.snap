@@ -1,0 +1,81 @@
+---
+source: crates/laudit-core/tests/golden.rs
+expression: output.model
+---
+{
+  "chapters": [
+    {
+      "id": "ch-on-ramp",
+      "intent": "Orient the reader in the fixture.",
+      "stop_ids": [
+        "sym-fef29e6b4b159b3c"
+      ],
+      "title": "On-ramp"
+    }
+  ],
+  "dirty_hash": "<dirty_hash>",
+  "flows": [
+    {
+      "id": "flow-main",
+      "steps": [
+        "sym-fef29e6b4b159b3c",
+        "sym-b5565ab003589aec",
+        "sym-db3eed20cac44502",
+        "sym-47938ee84292ee95",
+        "sym-1f4734d2d05f4598",
+        "sym-258da02a926eeee1",
+        "sym-b5edc880c9d2abd6",
+        "sym-fac0ac5e96c37b0a",
+        "sym-6e580a8f4349115c",
+        "sym-e613b6c088873354",
+        "sym-20aaf54e1d5059aa",
+        "sym-15d2233a6048fdad",
+        "sym-7cf6509af9b5ab9c"
+      ],
+      "title": "Main flow"
+    }
+  ],
+  "generated_at": "<generated_at>",
+  "generator": "laudit",
+  "glossary": [
+    {
+      "definition": "A small repository used for deterministic tests.",
+      "term": "fixture"
+    }
+  ],
+  "head": null,
+  "model": "test-model",
+  "prompt_version": "<prompt_version>",
+  "repo_id": "<repo_id>",
+  "schema_version": 1,
+  "subsystems": [
+    {
+      "files": [
+        "Cargo.toml",
+        "README.md",
+        "src/hub.rs",
+        "src/main.rs",
+        "src/util.rs"
+      ],
+      "id": "sub-core",
+      "summary": "The core of the fixture application.",
+      "symbol_ids": [
+        "sym-fef29e6b4b159b3c",
+        "sym-b5565ab003589aec",
+        "sym-db3eed20cac44502",
+        "sym-47938ee84292ee95",
+        "sym-1f4734d2d05f4598",
+        "sym-258da02a926eeee1",
+        "sym-b5edc880c9d2abd6",
+        "sym-fac0ac5e96c37b0a",
+        "sym-6e580a8f4349115c",
+        "sym-e613b6c088873354",
+        "sym-20aaf54e1d5059aa",
+        "sym-15d2233a6048fdad",
+        "sym-7cf6509af9b5ab9c"
+      ],
+      "title": "Core"
+    }
+  ],
+  "tool_version": "0.1.0"
+}

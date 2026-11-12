@@ -377,9 +377,11 @@ impl Narrator<'_> {
     ) -> Result<NarratedStop, String> {
         let context = self.build_context(chapter, stop)?;
         let valid_ids = context.valid_ids;
+        let mut payload = context.payload;
+        self.redactor.redact_value(&mut payload);
         let user = format!(
             "Explain the stop below. Use only the provided context and symbol IDs.\n\n{}",
-            serde_json::to_string_pretty(&context.payload).map_err(|error| error.to_string())?
+            serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?
         );
         let prompt = self.prompt;
         let (system, _) = self.redactor.redact(prompt);

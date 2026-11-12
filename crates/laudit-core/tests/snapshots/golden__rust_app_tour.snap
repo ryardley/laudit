@@ -1,0 +1,228 @@
+---
+source: crates/laudit-core/tests/golden.rs
+expression: output.tour
+---
+{
+  "chapters": [
+    {
+      "id": "on-ramp",
+      "stops": [
+        {
+          "end_line": 1,
+          "explanation": "This stop explains `sym-e613b6c088873354`.\n",
+          "file": "src/main.rs",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-e613b6c088873354",
+          "refs": [
+            "sym-e613b6c088873354"
+          ],
+          "start_line": 1,
+          "status": "explained",
+          "symbol_id": "sym-e613b6c088873354",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        }
+      ],
+      "title": "On-ramp"
+    },
+    {
+      "id": "subsystem-sub-core",
+      "stops": [
+        {
+          "end_line": 3,
+          "explanation": "This stop explains `sym-7cf6509af9b5ab9c`.\n",
+          "file": "src/util.rs",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-7cf6509af9b5ab9c",
+          "refs": [
+            "sym-7cf6509af9b5ab9c"
+          ],
+          "start_line": 1,
+          "status": "explained",
+          "symbol_id": "sym-7cf6509af9b5ab9c",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 1,
+          "explanation": "This stop explains `sym-fef29e6b4b159b3c`.\n",
+          "file": "Cargo.toml",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-fef29e6b4b159b3c",
+          "refs": [
+            "sym-fef29e6b4b159b3c"
+          ],
+          "start_line": 1,
+          "status": "explained",
+          "symbol_id": "sym-fef29e6b4b159b3c",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 2,
+          "explanation": "This stop explains `sym-b5565ab003589aec`.\n",
+          "file": "Cargo.toml",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-b5565ab003589aec",
+          "refs": [
+            "sym-b5565ab003589aec"
+          ],
+          "start_line": 2,
+          "status": "explained",
+          "symbol_id": "sym-b5565ab003589aec",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 3,
+          "explanation": "This stop explains `sym-db3eed20cac44502`.\n",
+          "file": "Cargo.toml",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-db3eed20cac44502",
+          "refs": [
+            "sym-db3eed20cac44502"
+          ],
+          "start_line": 3,
+          "status": "explained",
+          "symbol_id": "sym-db3eed20cac44502",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 5,
+          "explanation": "This stop explains `sym-47938ee84292ee95`.\n",
+          "file": "Cargo.toml",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-47938ee84292ee95",
+          "refs": [
+            "sym-47938ee84292ee95"
+          ],
+          "start_line": 4,
+          "status": "explained",
+          "symbol_id": "sym-47938ee84292ee95",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 6,
+          "explanation": "This stop explains `sym-1f4734d2d05f4598`.\n",
+          "file": "Cargo.toml",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-1f4734d2d05f4598",
+          "refs": [
+            "sym-1f4734d2d05f4598"
+          ],
+          "start_line": 6,
+          "status": "explained",
+          "symbol_id": "sym-1f4734d2d05f4598",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 7,
+          "explanation": "This stop explains `sym-258da02a926eeee1`.\n",
+          "file": "Cargo.toml",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-258da02a926eeee1",
+          "refs": [
+            "sym-258da02a926eeee1"
+          ],
+          "start_line": 7,
+          "status": "explained",
+          "symbol_id": "sym-258da02a926eeee1",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 8,
+          "explanation": "This stop explains `sym-b5edc880c9d2abd6`.\n",
+          "file": "Cargo.toml",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-b5edc880c9d2abd6",
+          "refs": [
+            "sym-b5edc880c9d2abd6"
+          ],
+          "start_line": 8,
+          "status": "explained",
+          "symbol_id": "sym-b5edc880c9d2abd6",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 5,
+          "explanation": "This stop explains `sym-fac0ac5e96c37b0a`.\n",
+          "file": "README.md",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-fac0ac5e96c37b0a",
+          "refs": [
+            "sym-fac0ac5e96c37b0a"
+          ],
+          "start_line": 1,
+          "status": "explained",
+          "symbol_id": "sym-fac0ac5e96c37b0a",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 5,
+          "explanation": "This stop explains `sym-6e580a8f4349115c`.\n",
+          "file": "src/hub.rs",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-6e580a8f4349115c",
+          "refs": [
+            "sym-6e580a8f4349115c"
+          ],
+          "start_line": 3,
+          "status": "explained",
+          "symbol_id": "sym-6e580a8f4349115c",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 3,
+          "explanation": "This stop explains `sym-20aaf54e1d5059aa`.\n",
+          "file": "src/main.rs",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-20aaf54e1d5059aa",
+          "refs": [
+            "sym-20aaf54e1d5059aa"
+          ],
+          "start_line": 2,
+          "status": "explained",
+          "symbol_id": "sym-20aaf54e1d5059aa",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        },
+        {
+          "end_line": 7,
+          "explanation": "This stop explains `sym-15d2233a6048fdad`.\n",
+          "file": "src/main.rs",
+          "file_hash": "<file_hash>",
+          "id": "stop-sym-15d2233a6048fdad",
+          "refs": [
+            "sym-15d2233a6048fdad"
+          ],
+          "start_line": 4,
+          "status": "explained",
+          "symbol_id": "sym-15d2233a6048fdad",
+          "title": "Fixture stop",
+          "why_here": "It is part of the fixture tour."
+        }
+      ],
+      "title": "Core"
+    }
+  ],
+  "model": "test-model",
+  "position": {
+    "chapter": 0,
+    "stop": 0
+  },
+  "prompt_version": "<prompt_version>",
+  "redaction_profile": "default",
+  "schema_version": 1,
+  "source": {
+    "kind": "codebase"
+  },
+  "tool_version": "0.1.0",
+  "tour_id": "<tour_id>"
+}

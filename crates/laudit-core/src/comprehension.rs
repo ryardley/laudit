@@ -304,7 +304,9 @@ async fn call_model(
     user_prefix: &str,
     payload: &Value,
 ) -> Result<ModelResponse, ComprehensionError> {
-    let payload = serde_json::to_string_pretty(payload)?;
+    let mut payload = payload.clone();
+    redactor.redact_value(&mut payload);
+    let payload = serde_json::to_string_pretty(&payload)?;
     let user = format!("{user_prefix}\n\n{payload}");
     let (system, _) = redactor.redact(system_prompt);
     let (user, _) = redactor.redact(&user);
