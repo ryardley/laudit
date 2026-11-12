@@ -48,6 +48,29 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  pr-tour:
+    name: PR change tour (fixture)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Fixture PR change tour
+        run: bash scripts/pr-tour-fixture.sh
+
   nvim:
     name: Neovim (headless)
     runs-on: ubuntu-latest

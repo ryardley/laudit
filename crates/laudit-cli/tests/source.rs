@@ -244,3 +244,125 @@ fn tour_rejects_an_invalid_range() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("invalid range"), "got: {stderr}");
 }
+
+#[test]
+fn tour_range_markdown_is_stable_and_redacted() {
+    let repo = init_repo();
+    let base = git_ok(repo.path(), &["rev-parse", "HEAD"]);
+
+    let lib = repo.path().join("src/lib.rs");
+    let mut source = fs::read_to_string(&lib).expect("read lib");
+    source.push_str(
+        "\npub fn multiply(left: i32, right: i32) -> i32 {\n    left * right\n}\n\npub fn token() -> &'static str {\n    \"ghp_0123456789abcdefghijklmnopqrstuvwxyz\"\n}\n",
+    );
+    fs::write(&lib, source).expect("edit lib");
+    git_ok(repo.path(), &["add", "src/lib.rs"]);
+    let head = commit(
+        repo.path(),
+        "add multiply and token",
+        "2021-01-01T00:00:00Z",
+    );
+
+    let config_dir = repo.path().join("config");
+    let range = format!("{base}..{head}");
+    let first = repo.path().join("tour.md");
+    let output = laudit(
+        repo.path(),
+        &config_dir,
+        &[
+            "tour",
+            "--offline",
+            "--range",
+            &range,
+            "--md",
+            "--out",
+            first.to_str().expect("path"),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "tour failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let markdown = fs::read_to_string(&first).expect("read markdown");
+    assert!(markdown.contains("## Changes"), "got:\n{markdown}");
+    assert!(markdown.contains("multiply"), "got:\n{markdown}");
+    assert!(
+        !markdown.contains("ghp_0123456789abcdefghijklmnopqrstuvwxyz"),
+        "secret leaked:\n{markdown}"
+    );
+    assert!(
+        markdown.contains("«github_token#1»"),
+        "missing placeholder:\n{markdown}"
+    );
+
+    let second = repo.path().join("tour-again.md");
+    let output = laudit(
+        repo.path(),
+        &config_dir,
+        &[
+            "tour",
+            "--offline",
+            "--range",
+            &range,
+            "--md",
+            "--out",
+            second.to_str().expect("path"),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "second tour failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        markdown,
+        fs::read_to_string(&second).expect("read second markdown")
+    );
+}
+
+#[test]
+fn tour_markdown_prints_to_stdout() {
+    let repo = init_repo();
+    let base = git_ok(repo.path(), &["rev-parse", "HEAD"]);
+
+    let lib = repo.path().join("src/lib.rs");
+    let mut source = fs::read_to_string(&lib).expect("read lib");
+    source.push_str("\npub fn multiply(left: i32, right: i32) -> i32 {\n    left * right\n}\n");
+    fs::write(&lib, source).expect("edit lib");
+    git_ok(repo.path(), &["add", "src/lib.rs"]);
+    let head = commit(repo.path(), "add multiply helper", "2021-01-01T00:00:00Z");
+
+    let config_dir = repo.path().join("config");
+    let range = format!("{base}..{head}");
+    let output = laudit(
+        repo.path(),
+        &config_dir,
+        &["tour", "--offline", "--range", &range, "--md"],
+    );
+    assert!(
+        output.status.success(),
+        "tour failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("# "), "got:\n{stdout}");
+    assert!(stdout.contains("## Changes"), "got:\n{stdout}");
+    assert!(stdout.contains("```rust"), "got:\n{stdout}");
+}
+
+#[test]
+fn tour_out_requires_markdown() {
+    let repo = init_repo();
+    let config_dir = repo.path().join("config");
+
+    let output = laudit(
+        repo.path(),
+        &config_dir,
+        &["tour", "--offline", "--out", "tour.md"],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--md"), "got: {stderr}");
+}

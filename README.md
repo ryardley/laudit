@@ -117,12 +117,24 @@ base_url = "http://localhost:11434/v1"
 model = "llama3.1"
 ```
 
+### PR change tours in CI
+
+Render a pull request's changes as markdown for a comment or build artifact:
+
+```sh
+laudit tour --range origin/main..HEAD --md --out tour.md
+```
+
+Add `--offline` to produce a structure-only tour without an API key. See
+[docs/frontends.md](docs/frontends.md#pr-change-tours-in-ci) for a GitHub
+Actions example and the `LAUDIT_API_KEY` fallback behavior.
+
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `laudit build [--offline] [--check] [--quiet] [--include-tests] [--skip-config]` | Run recon (+ comprehension/plan unless `--offline`). `--check` exits non-zero if artifacts are stale. |
-| `laudit tour [--print] [--uncommitted \| --range <base..head> [--per-commit]]` | Run the interactive TUI, or print the tour with `--print`. Source flags tour uncommitted changes or a commit range. |
+| `laudit tour [--print \| --md [--out <path>]] [--uncommitted \| --range <base..head> [--per-commit]]` | Run the interactive TUI, print the tour with `--print`, or render markdown with `--md`. Source flags tour uncommitted changes or a commit range. |
 | `laudit explain <symbol>` | Print a grounded explanation for one symbol. |
 | `laudit export --md [--out <path>]` | Render the tour to markdown. |
 | `laudit export --html [--out <dir\|file>]` | Render the tour to a self-contained HTML document. |

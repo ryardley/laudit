@@ -1,6 +1,6 @@
 ---
 id: lc-ruae
-status: open
+status: closed
 deps: [lc-q4hn, lc-taeh]
 links: []
 created: 2026-11-12T09:02:36Z

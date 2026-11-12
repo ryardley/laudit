@@ -880,3 +880,53 @@ fn interactive_tour_requires_a_terminal() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("requires a terminal"), "got: {stderr}");
 }
+
+#[test]
+fn tour_md_renders_the_codebase_tour_to_stdout_and_a_file() {
+    let temp = TempDir::new();
+    copy_dir_all(&fixture_root(), temp.path()).expect("copy fixture");
+    let repo = temp.path().to_str().expect("utf-8 temp path").to_owned();
+    let config_dir = temp.path().join("config");
+
+    let build = laudit_with_config_dir(&config_dir, &["build", "--offline", "--repo", &repo]);
+    assert!(
+        build.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let output =
+        laudit_with_config_dir(&config_dir, &["tour", "--md", "--offline", "--repo", &repo]);
+    assert!(
+        output.status.success(),
+        "tour --md failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("# "), "got: {stdout}");
+    assert!(stdout.contains("## "), "got: {stdout}");
+    assert!(stdout.contains("```"), "got: {stdout}");
+
+    let out_path = temp.path().join("tour.md");
+    let output = laudit_with_config_dir(
+        &config_dir,
+        &[
+            "tour",
+            "--md",
+            "--offline",
+            "--out",
+            out_path.to_str().expect("utf-8 output path"),
+            "--repo",
+            &repo,
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "tour --md --out failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&out_path).expect("read markdown"),
+        stdout
+    );
+}

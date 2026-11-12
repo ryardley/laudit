@@ -94,8 +94,14 @@ struct BuildArgs {
 #[derive(Debug, Args)]
 struct TourArgs {
     /// Print the tour to stdout (pipe-friendly)
-    #[arg(long)]
+    #[arg(long, conflicts_with = "md")]
     print: bool,
+    /// Render the tour as markdown
+    #[arg(long, conflicts_with = "print")]
+    md: bool,
+    /// Write markdown to a file (requires --md)
+    #[arg(long, requires = "md", value_name = "PATH")]
+    out: Option<PathBuf>,
     /// Tour uncommitted changes
     #[arg(long)]
     uncommitted: bool,
@@ -385,7 +391,11 @@ fn run_tour(repo: Option<PathBuf>, offline: bool, color: ColorChoice, args: Tour
     };
 
     if let Some(spec) = source {
-        return run_source_tour(repo_root, offline, color, args.print, spec);
+        return run_source_tour(repo_root, offline, color, &args, spec);
+    }
+
+    if args.md {
+        return run_codebase_markdown(repo_root, offline, &args);
     }
 
     if !args.print {
@@ -489,11 +499,134 @@ fn run_tour(repo: Option<PathBuf>, offline: bool, color: ColorChoice, args: Tour
     }
 }
 
+fn run_codebase_markdown(repo_root: PathBuf, offline: bool, args: &TourArgs) -> ExitCode {
+    let config = if offline {
+        match laudit_core::config::Config::load_offline(&repo_root) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        match laudit_core::config::Config::load(&repo_root) {
+            Ok(config) => config,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    };
+
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let prepared = if offline {
+        let mut sink = laudit_core::narration::NoopSink;
+        runtime.block_on(laudit_core::print::prepare(
+            &repo_root, &config, true, None, &mut sink,
+        ))
+    } else {
+        report_prompt_install();
+        let client = match laudit_core::llm::LlmClient::from_config(&config) {
+            Ok(client) => client,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let mut sink = laudit_core::narration::NoopSink;
+        runtime.block_on(laudit_core::print::prepare(
+            &repo_root,
+            &config,
+            false,
+            Some(&client),
+            &mut sink,
+        ))
+    };
+
+    match prepared {
+        Ok(prepared) => {
+            for warning in &prepared.warnings {
+                eprintln!("laudit: warning: {warning}");
+            }
+            let report = match laudit_core::export::export_markdown(
+                &repo_root,
+                Some(&prepared.tour.tour_id),
+                None,
+            ) {
+                Ok(report) => report,
+                Err(error) => {
+                    eprintln!("laudit tour: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let markdown = match redact_markdown(&report.markdown, &config) {
+                Ok(markdown) => markdown,
+                Err(error) => {
+                    eprintln!("laudit tour: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            write_markdown(&markdown, args.out.as_deref())
+        }
+        Err(error) => {
+            eprintln!("laudit tour: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn redact_markdown(
+    markdown: &str,
+    config: &laudit_core::config::Config,
+) -> Result<String, laudit_core::redact::RedactError> {
+    let (redacted, _) = laudit_core::redact::redact_with_config(markdown, &config.redaction)?;
+    Ok(redacted)
+}
+
+fn write_markdown(markdown: &str, out: Option<&Path>) -> ExitCode {
+    match out {
+        Some(path) if path != Path::new("-") => {
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    if let Err(error) = std::fs::create_dir_all(parent) {
+                        eprintln!(
+                            "laudit tour: failed to create {}: {error}",
+                            parent.display()
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            match std::fs::write(path, markdown) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("laudit tour: failed to write {}: {error}", path.display());
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        _ => {
+            print!("{markdown}");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
 fn run_source_tour(
     repo_root: PathBuf,
     offline: bool,
     color: ColorChoice,
-    print: bool,
+    args: &TourArgs,
     spec: laudit_core::source::SourceSpec,
 ) -> ExitCode {
     let config = if offline {
@@ -551,7 +684,7 @@ fn run_source_tour(
         eprintln!("laudit: warning: {warning}");
     }
 
-    if !print {
+    if !args.md && !args.print {
         return match laudit_tui::run(repo_root, offline) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
@@ -561,70 +694,86 @@ fn run_source_tour(
         };
     }
 
-    let color_enabled = color_enabled(color);
-    if offline {
-        print!(
-            "{}",
-            laudit_core::print::render(
-                &report.tour,
-                laudit_core::print::PrintOptions {
-                    color: color_enabled,
-                    offline: true,
-                },
-            )
-        );
-        return ExitCode::SUCCESS;
-    }
-
-    report_prompt_install();
-    let client = match laudit_core::llm::LlmClient::from_config(&config) {
-        Ok(client) => client,
-        Err(error) => {
-            eprintln!("laudit tour: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            eprintln!("laudit tour: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let mut sink = laudit_core::narration::NoopSink;
-    match runtime.block_on(laudit_core::print::prepare_tour(
-        &repo_root,
-        &config,
-        false,
-        Some(&client),
-        &mut sink,
-        report.tour,
-    )) {
-        Ok(prepared) => {
-            for warning in &prepared.warnings {
-                eprintln!("laudit: warning: {warning}");
+    let tour = if offline {
+        report.tour
+    } else {
+        report_prompt_install();
+        let client = match laudit_core::llm::LlmClient::from_config(&config) {
+            Ok(client) => client,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
             }
-            print!(
-                "{}",
-                laudit_core::print::render(
-                    &prepared.tour,
-                    laudit_core::print::PrintOptions {
-                        color: color_enabled,
-                        offline: false,
-                    },
-                )
-            );
-            ExitCode::SUCCESS
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+
+        let mut sink = laudit_core::narration::NoopSink;
+        match runtime.block_on(laudit_core::print::prepare_tour(
+            &repo_root,
+            &config,
+            false,
+            Some(&client),
+            &mut sink,
+            report.tour,
+        )) {
+            Ok(prepared) => {
+                for warning in &prepared.warnings {
+                    eprintln!("laudit: warning: {warning}");
+                }
+                prepared.tour
+            }
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
         }
-        Err(error) => {
-            eprintln!("laudit tour: {error}");
-            ExitCode::FAILURE
-        }
+    };
+
+    if args.md {
+        let markdown = match laudit_core::export::render_markdown(
+            &repo_root,
+            &tour,
+            &model,
+            Some(&recon.skeleton),
+            &laudit_core::export::MarkdownOptions::default(),
+        ) {
+            Ok(markdown) => markdown,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let markdown = match redact_markdown(&markdown, &config) {
+            Ok(markdown) => markdown,
+            Err(error) => {
+                eprintln!("laudit tour: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        return write_markdown(&markdown, args.out.as_deref());
     }
+
+    let color_enabled = color_enabled(color);
+    print!(
+        "{}",
+        laudit_core::print::render(
+            &tour,
+            laudit_core::print::PrintOptions {
+                color: color_enabled,
+                offline,
+            },
+        )
+    );
+    ExitCode::SUCCESS
 }
 
 fn run_explain(repo: Option<PathBuf>, offline: bool, color: ColorChoice, symbol: &str) -> ExitCode {

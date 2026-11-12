@@ -51,5 +51,6 @@ must be stable across runs (deterministic recon; mocked LLM).
 ## CI
 
 GitHub Actions runs: `cargo fmt --check`, `cargo clippy -- -D warnings`,
-`cargo test`, headless Neovim tests, `cargo-deny`, and `cargo-audit`. Cargo is
-cached. Runs on push and PR.
+`cargo test`, a fixture PR change-tour job (`scripts/pr-tour-fixture.sh`),
+headless Neovim tests, `cargo-deny`, and `cargo-audit`. Cargo is cached. Runs on
+push and PR.

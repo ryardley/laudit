@@ -8,7 +8,7 @@ All frontends are thin layers over `laudit-core`. The engine is CLI-first (D23).
 |---|---|
 | `laudit build [--offline] [--check] [--quiet] [--include-tests] [--skip-config]` | Run recon (+ comprehension/plan unless `--offline`). `--check` exits non-zero if artifacts are stale. |
 | `laudit serve` | Start the JSON-RPC 2.0 stdio server (see `docs/protocol.md`). |
-| `laudit tour [--print] [--uncommitted \| --range <base..head> [--per-commit]]` | Run the interactive TUI, or print the tour with `--print`. Source flags tour uncommitted changes or a commit range. |
+| `laudit tour [--print \| --md [--out <path>]] [--uncommitted \| --range <base..head> [--per-commit]]` | Run the interactive TUI, print the tour with `--print`, or render markdown with `--md`. Source flags tour uncommitted changes or a commit range. |
 | `laudit explain <symbol>` | Print a grounded explanation for one symbol. |
 | `laudit export --md [--out <path>]` | Render a tour to markdown. |
 | `laudit export --html [--out <dir\|file>]` | Render a tour to a self-contained HTML document. |
@@ -99,3 +99,70 @@ require('laudit').setup({
   `file:line`, fenced code of the range, `why_here`, explanation, refs as links.
 - **HTML:** self-contained page with chapter nav, code pane, prose pane, and
   cross-links to definitions. Works offline.
+
+## PR change tours in CI
+
+`laudit tour` can render a change tour as markdown for a pull-request comment or
+build artifact. Combine a source flag (`--range` or `--uncommitted`) with `--md`;
+`--out` writes the document to a file instead of stdout.
+
+```sh
+laudit tour --range origin/main..HEAD --md --out tour.md
+```
+
+The markdown is deterministic for a given diff and is redacted before it is
+written (D11). With `--offline` the tour contains the structure and code ranges
+but no LLM prose, so it works without a provider or API key. Without `--offline`
+the stops are narrated first, then rendered.
+
+### GitHub Actions example
+
+Set a repository secret named `LAUDIT_API_KEY` to enable narration. When the
+secret is absent the workflow falls back to `--offline`, producing a
+structure-only tour instead of failing. `provider.api_key_env` can point at a
+different variable if the team already has one.
+
+```yaml
+name: PR change tour
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  tour:
+    runs-on: ubuntu-latest
+    env:
+      LAUDIT_API_KEY: ${{ secrets.LAUDIT_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build laudit
+        run: cargo build --release -p laudit-cli
+      - name: Generate change tour
+        run: |
+          if [ -n "$LAUDIT_API_KEY" ]; then
+            ./target/release/laudit tour \
+              --range "origin/${{ github.base_ref }}..HEAD" \
+              --md --out tour.md
+          else
+            ./target/release/laudit tour \
+              --range "origin/${{ github.base_ref }}..HEAD" \
+              --md --out tour.md --offline
+          fi
+      - name: Upload tour artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: laudit-tour
+          path: tour.md
+      - name: Comment on the pull request
+        if: env.LAUDIT_API_KEY != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment "${{ github.event.pull_request.number }}" --body-file tour.md
+```
+
+The `pr-tour` job in `.github/workflows/ci.yml` exercises the same path against
+a throwaway fixture PR with `--offline`, and asserts that the markdown is stable
+and redacted.
