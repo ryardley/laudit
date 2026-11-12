@@ -8,9 +8,16 @@ fn main() -> ExitCode {
             println!("laudit {}", laudit_core::version());
             ExitCode::SUCCESS
         }
+        Some("serve") => match laudit_core::rpc::run() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("laudit serve: {error}");
+                ExitCode::FAILURE
+            }
+        },
         Some(other) => {
             eprintln!("laudit: unknown argument `{other}`");
-            eprintln!("usage: laudit [--version]");
+            eprintln!("usage: laudit [--version] | laudit serve");
             ExitCode::from(2)
         }
     }

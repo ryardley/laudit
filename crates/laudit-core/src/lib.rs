@@ -1,5 +1,7 @@
 //! Editor-agnostic engine for `laudit` guided codebase tours.
 
+pub mod rpc;
+
 /// The crate version, stamped into artifacts as `tool_version`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

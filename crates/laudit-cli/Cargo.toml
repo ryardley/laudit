@@ -15,3 +15,6 @@ workspace = true
 
 [dependencies]
 laudit-core = { path = "../laudit-core" }
+
+[dev-dependencies]
+serde_json = "1.0.154"
